@@ -152,9 +152,20 @@ module display (
     always_ff @(posedge clk_pix) begin
         rd_addr_s1   <= rd_addr_s0;
         front_sel_s1 <= front_sel;
-        active_d     <= {active_d[1:0], active};
-        hsync_d      <= {hsync_d[1:0], hsync_n};
-        vsync_d      <= {vsync_d[1:0], vsync_n};
+    end
+
+    // Syncs idle high and the visible flag low in reset, so no pulse leaves
+    // the pins while the delay line fills.
+    always_ff @(posedge clk_pix) begin
+        if (rst_pix) begin
+            active_d <= '0;
+            hsync_d  <= '1;
+            vsync_d  <= '1;
+        end else begin
+            active_d <= {active_d[1:0], active};
+            hsync_d  <= {hsync_d[1:0], hsync_n};
+            vsync_d  <= {vsync_d[1:0], vsync_n};
+        end
     end
 
     framebuffer u_fb (

@@ -1,49 +1,34 @@
-`timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 01.09.2026 21:15:25
-// Design Name: 
-// Module Name: memory_array
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
-
-
-module memory_arr #(parameter W=32, D = 4096, INIT_FILE="" )(
-input logic clk,
-input logic [3:0] byte_we,
-input logic [W-1:0] d_wr,
-input logic [$clog2(D)-1:0] word_addr,
-output logic [W-1:0] raw
+// Single-port block RAM with per-lane write enables and a registered read.
+//
+// W bits wide, D words deep, split into NBE write lanes of W/NBE bits each.
+// Reads return mem[addr] one cycle after addr is presented (BRAM output
+// latch). INIT_FILE, when not empty, is loaded with $readmemh; Vivado picks the
+// file up through read_mem, Verilator from the working directory.
+module memory_arr #(
+    parameter int    W         = 32,
+    parameter int    D         = 8192,
+    parameter int    NBE       = W / 8,
+    parameter string INIT_FILE = ""
+) (
+    input  logic                 clk,
+    input  logic [NBE-1:0]       we,
+    input  logic [$clog2(D)-1:0] addr,
+    input  logic [W-1:0]         wdata,
+    output logic [W-1:0]         rdata
 );
 
-    logic [W-1:0] mem [D-1:0];
+    localparam int LW = W / NBE;
+
+    (* ram_style = "block" *) logic [W-1:0] mem [D];
+
     initial begin
         if (INIT_FILE != "") $readmemh(INIT_FILE, mem);
-        
-        end
-    //byte addressed memory 
-    (* ram_style = "block" *)
-    
-    //byte addressed memory needs byte addressed w.e. per byte in word
-    always_ff @(posedge clk) begin
-    raw <= mem[word_addr];
-    for (int i = 0; i < 4; i++)
-        if (byte_we[i]) mem[word_addr][i*8 +: 8] <= d_wr[i*8 +: 8];
     end
 
-
-
+    always_ff @(posedge clk) begin
+        rdata <= mem[addr];
+        for (int i = 0; i < NBE; i++)
+            if (we[i]) mem[addr][i*LW +: LW] <= wdata[i*LW +: LW];
+    end
 
 endmodule

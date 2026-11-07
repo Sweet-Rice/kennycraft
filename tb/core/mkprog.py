@@ -5,8 +5,11 @@ from pathlib import Path
 
 MESSAGE = "Hello, world!\r\n"
 
-RESET_VECTOR = 0x8000_0000
-IMEM_WORDS = 4096
+RESET_VECTOR = 0x0000_0000  # kc_isa_pkg IMEM_BASE
+IMEM_WORDS = 8192           # 32 KB
+MMIO_BASE = 0x5000_0000
+UART_STATUS = 0x14          # bit 1 TX busy
+UART_TX = 0x18
 OUTPUT_PATH = Path(__file__).with_name("program.mem")
 
 
@@ -104,6 +107,10 @@ def sb(rs2, offset, rs1):
     return _encode_s(rs1, rs2, offset, 0b000)
 
 
+def andi(rd, rs1, imm):
+    return _encode_i(rd, rs1, imm, 0b111, 0b0010011)
+
+
 def bne(rs1, rs2, offset):
     return _encode_b(rs1, rs2, offset, 0b001)
 
@@ -128,6 +135,9 @@ def self_test():
     assert bne(1, 2, 8) == 0x00209463
     assert beq(1, 2, 12) == 0x00208663
     assert jal(0, 0) == 0x0000006F
+    assert lui(6, 0x50000) == 0x50000337
+    assert andi(8, 8, 2) == 0x00247413
+    assert sb(7, 0x18, 6) == 0x00730C23
 
 
 def assemble(message):
@@ -138,7 +148,7 @@ def assemble(message):
         address = RESET_VECTOR + 4 * len(program)
         program.append((address, word, mnemonic))
 
-    emit(lui(6, 0x10000), "lui  x6, 0x10000")
+    emit(lui(6, MMIO_BASE >> 12), f"lui  x6, 0x{MMIO_BASE >> 12:05x}")
     start_address = RESET_VECTOR + 4
 
     for index, char in enumerate(message):
@@ -151,7 +161,8 @@ def assemble(message):
         emit(addi(7, 0, value), f"addi x7, x0, {value:<3}  # {ascii(char)}")
 
         poll_address = RESET_VECTOR + 4 * len(program)
-        emit(lw(8, 4, 6), "lw   x8, 4(x6)")
+        emit(lw(8, UART_STATUS, 6), f"lw   x8, {UART_STATUS}(x6)   # UART_STATUS")
+        emit(andi(8, 8, 2), "andi x8, x8, 2     # TX busy")
 
         branch_address = RESET_VECTOR + 4 * len(program)
         branch_offset = poll_address - branch_address
@@ -159,13 +170,13 @@ def assemble(message):
             bne(8, 0, branch_offset),
             f"bne  x8, x0, {branch_offset}    # -> 0x{poll_address:08x}",
         )
-        emit(sb(7, 0, 6), "sb   x7, 0(x6)")
+        emit(sb(7, UART_TX, 6), f"sb   x7, {UART_TX}(x6)   # UART_TX")
 
     jump_address = RESET_VECTOR + 4 * len(program)
     jump_offset = start_address - jump_address
     emit(jal(0, jump_offset), f"jal  x0, {jump_offset}  # -> 0x{start_address:08x}")
 
-    expected_words = 2 + 4 * len(message)
+    expected_words = 2 + 5 * len(message)
     assert len(program) == expected_words
     if len(program) > IMEM_WORDS:
         raise ValueError(

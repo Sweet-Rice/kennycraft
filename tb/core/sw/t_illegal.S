@@ -1,0 +1,104 @@
+/* t_illegal: every illegal case halts with ERR.ILLEGAL and the right ERR_PC
+   (Tai_2 sections 1 and 2): DIV, ECALL, a CSR read, a misaligned LW and VGET
+   field 2, plus the other DIV/REM forms, EBREAK, misaligned LH/SW/SH, a
+   reserved custom-0 encoding, custom-1/custom-2 instructions whose unit is
+   absent in Stage 0, an all-zero word and a fetch outside instruction memory. The testbench writes the case number to
+   TB_SELECT and resets the core once per case. Case k sits at 0x100 + 0x40*k
+   with the faulting instruction first in its slot (case 15 faults at 0x8000).
+   Case 17 is the legal control: FENCE/FENCE.I run, ERR/ERR_PC still hold the
+   previous case's error after reset, ERR clears on write 1, unmapped and
+   imem-region data accesses read 0 without an error. */
+#include "kc_test.h"
+
+    /* DIV/REM and FENCE.I are not in rv32i_zmmul; assemble them anyway. */
+    .option arch, +m, +zifencei
+
+    .section .text.start
+    .globl _start
+_start:
+    li    t0, DMEM_BASE
+    lw    t1, (TB_SELECT - DMEM_BASE)(t0)
+    li    a2, 0x55              /* rd of every faulting instruction */
+    slli  t1, t1, 6
+    addi  t1, t1, 0x100
+    jr    t1
+
+/* Never reached when the instruction before it halts the core. */
+.macro NOT_REACHED
+    li    t2, 1
+    sw    t2, (TB_MARK - DMEM_BASE)(t0)
+99: j     99b
+.endm
+
+    .org 0x100                  /* 0: DIV */
+    div    a2, a0, a1
+    NOT_REACHED
+    .org 0x140                  /* 1: DIVU */
+    divu   a2, a0, a1
+    NOT_REACHED
+    .org 0x180                  /* 2: REM */
+    rem    a2, a0, a1
+    NOT_REACHED
+    .org 0x1c0                  /* 3: REMU */
+    remu   a2, a0, a1
+    NOT_REACHED
+    .org 0x200                  /* 4: ECALL */
+    ecall
+    NOT_REACHED
+    .org 0x240                  /* 5: EBREAK */
+    ebreak
+    NOT_REACHED
+    .org 0x280                  /* 6: CSR read, csrrs a2, cycle, x0 (no Zicsr) */
+    .insn i 0x73, 2, a2, x0, -1024
+    NOT_REACHED
+    .org 0x2c0                  /* 7: misaligned LW */
+    lw     a2, 2(t0)
+    NOT_REACHED
+    .org 0x300                  /* 8: misaligned LH */
+    lh     a2, 1(t0)
+    NOT_REACHED
+    .org 0x340                  /* 9: misaligned SW over TB_MARK, must not store */
+    sw     t0, (TB_MARK - DMEM_BASE + 1)(t0)
+    NOT_REACHED
+    .org 0x380                  /* 10: misaligned SH, must not store */
+    sh     t0, (TB_MARK - DMEM_BASE + 1)(t0)
+    NOT_REACHED
+    .org 0x3c0                  /* 11: VGET a2, field 2 (reserved) */
+    .insn r 0x2B, 2, 2, a2, x0, x0
+    NOT_REACHED
+    .org 0x400                  /* 12: VTRACE, legal encoding, no ray unit in Stage 0 */
+    .insn r 0x2B, 1, 0, a2, a1, x0
+    NOT_REACHED
+    .org 0x440                  /* 13: custom-0 funct3 010 (reserved) */
+    .insn r 0x0B, 2, 0, a2, x0, x0
+    NOT_REACHED
+    .org 0x480                  /* 14: DENDIF, no divergence unit in Stage 0 */
+    .insn r 0x5B, 2, 0, x0, x0, x0
+    NOT_REACHED
+    .org 0x4c0                  /* 15: fetch outside instruction memory */
+    li     a3, 0x8000
+    jr     a3
+    .org 0x500                  /* 16: all-zero word (not an RV32I instruction) */
+    .word  0
+    NOT_REACHED
+    .org 0x540                  /* 17: legal control */
+    fence
+    fence.i
+    li     s0, MMIO_BASE
+    lw     a4, MMIO_ERR(s0)
+    sw     a4, 0xE0(t0)         /* ERR left by the previous case */
+    lw     a4, MMIO_ERR_PC(s0)
+    sw     a4, 0xE4(t0)
+    li     a4, 7
+    sw     a4, MMIO_ERR(s0)     /* write 1 to clear */
+    lw     a4, MMIO_ERR(s0)
+    sw     a4, 0xE8(t0)
+    li     a5, 0x70000000
+    sw     a4, 0(a5)            /* unmapped: dropped */
+    lw     a4, 0(a5)
+    sw     a4, 0xEC(t0)
+    lw     a4, 0(zero)          /* imem region is fetch only: reads 0 */
+    sw     a4, 0xD8(t0)
+    li     a4, 1
+    sw     a4, (TB_DONE - DMEM_BASE)(t0)
+1:  j      1b

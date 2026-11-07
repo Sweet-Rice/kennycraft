@@ -4,8 +4,13 @@
 // Port A (clk_a, 50 MHz core side) reads and writes the buffer picked by
 // sel_a; the display passes the back buffer there. Port B (clk_b, 25 MHz) is
 // the read-only scan-out port on the buffer picked by sel_b, the front buffer.
-// Both ports have one cycle of read latency; sel is registered alongside the
-// address so the output mux follows the buffer that was actually read.
+// Both ports have one cycle of read latency.
+//
+// Each buffer is 19 banks of 4096 x 8 (one BRAM36 each, bank = addr[16:12];
+// bank 18 holds the last 3,072 bytes). Left to itself Vivado splits a single
+// 76,800-deep array into 24 BRAM36 per buffer. Only the addressed bank of the
+// addressed buffer is enabled; the buffer and bank are registered with the
+// address so the output mux follows the bank that was actually read.
 // Writes at addr_a >= 76,800 are dropped. Reads there return unspecified data.
 module framebuffer (
     // Port A, core side
@@ -22,37 +27,55 @@ module framebuffer (
     input  logic [16:0] addr_b,
     output logic [7:0]  rdata_b
 );
-    localparam int FB_BYTES = 320 * 240;   // 76,800
+    localparam int FB_BYTES   = 320 * 240;               // 76,800
+    localparam int BANK_BYTES = 4096;
+    localparam int BANKS      = (FB_BYTES + BANK_BYTES - 1) / BANK_BYTES;   // 19
 
+    logic [4:0] bank_a, bank_b;
+    logic [4:0] bank_a_q, bank_b_q;
+    logic       sel_a_q, sel_b_q;
     logic       in_range_a;
-    logic       sel_a_q;
-    logic       sel_b_q;
-    logic [7:0] rd_a [2];
-    logic [7:0] rd_b [2];
+    logic [7:0] rd_a [2][BANKS];
+    logic [7:0] rd_b [2][BANKS];
 
+    assign bank_a     = addr_a[16:12];
+    assign bank_b     = addr_b[16:12];
     assign in_range_a = (addr_a < 17'(FB_BYTES));
 
     for (genvar b = 0; b < 2; b++) begin : g_buf
-        (* ram_style = "block" *) logic [7:0] mem [FB_BYTES];
+        for (genvar k = 0; k < BANKS; k++) begin : g_bank
+            (* ram_style = "block" *) logic [7:0] mem [BANK_BYTES];
 
-        logic en_a_b;
-        assign en_a_b = en_a && (sel_a == 1'(b));
+            logic hit_a, hit_b;
+            assign hit_a = en_a && (sel_a == 1'(b)) && (bank_a == 5'(k));
+            assign hit_b = (sel_b == 1'(b)) && (bank_b == 5'(k));
 
-        always_ff @(posedge clk_a) begin
-            if (en_a_b) begin
-                if (we_a && in_range_a) mem[addr_a] <= wdata_a;
-                rd_a[b] <= mem[addr_a];
+            always_ff @(posedge clk_a) begin
+                if (hit_a) begin
+                    if (we_a && in_range_a) mem[addr_a[11:0]] <= wdata_a;
+                    rd_a[b][k] <= mem[addr_a[11:0]];
+                end
             end
-        end
 
-        always_ff @(posedge clk_b) begin
-            rd_b[b] <= mem[addr_b];
+            always_ff @(posedge clk_b) begin
+                if (hit_b) rd_b[b][k] <= mem[addr_b[11:0]];
+            end
         end
     end
 
-    always_ff @(posedge clk_a) if (en_a) sel_a_q <= sel_a;
-    always_ff @(posedge clk_b) sel_b_q <= sel_b;
+    always_ff @(posedge clk_a) begin
+        if (en_a) begin
+            sel_a_q  <= sel_a;
+            bank_a_q <= bank_a;
+        end
+    end
 
-    assign rdata_a = rd_a[sel_a_q];
-    assign rdata_b = rd_b[sel_b_q];
+    always_ff @(posedge clk_b) begin
+        sel_b_q  <= sel_b;
+        bank_b_q <= bank_b;
+    end
+
+    // Bank indices >= 19 only occur for out-of-range addresses; any data will do.
+    assign rdata_a = (bank_a_q < 5'(BANKS)) ? rd_a[sel_a_q][bank_a_q] : 8'h00;
+    assign rdata_b = (bank_b_q < 5'(BANKS)) ? rd_b[sel_b_q][bank_b_q] : 8'h00;
 endmodule

@@ -1,9 +1,13 @@
 // Shared harness for the DDR3 chunk store testbenches, `include`d inside each
 // test module. Instantiates chunk_engine + ddr_bridge + ddr_model + world_remap
-// (LANES = 8) and a behavioral world_mem with the top-level port-A priority
-// VTRACE > core > engine. Provides MMIO, world and DDR backdoor tasks.
+// (LANES = 8) and a behavioral world_mem (D17: two copies, two ports each)
+// with the top-level port-A priority VTRACE > core > engine. Provides MMIO,
+// world and DDR backdoor tasks.
 
-localparam int LANES = 8;
+localparam int LANES         = 8;
+localparam int COPIES        = 2;  // copy n serves VTRACE lanes 4n..4n+3
+localparam int WORLD_LATENCY = 2;  // VTRACE world read, in core cycles
+
 localparam logic [5:0] OFF_STATUS = 6'h2C;
 localparam logic [5:0] OFF_CMD    = 6'h30;
 localparam logic [5:0] OFF_DONE   = 6'h34;
@@ -40,11 +44,19 @@ logic        eng_we, eng_re;
 logic [16:0] eng_addr;
 logic [3:0]  eng_wdata;
 logic [16:0] vt_addr  [LANES];
+// world_remap sees vt_addr through vt_addr_u. Verilator 5.020 does not wake
+// combinational logic when a timed process writes an element of an unpacked
+// array, so world_remap's vt_paddr would only follow vt_addr one clock late;
+// reading clk here re-evaluates the copy on every clock edge.
+logic [16:0] vt_addr_u [LANES];
+always_comb
+  for (int l = 0; l < LANES; l++) vt_addr_u[l] = clk ? vt_addr[l] : vt_addr[l];
 logic [16:0] vt_paddr [LANES];
 logic [3:0]  vt_rdata_phys [LANES];
 logic [3:0]  vt_rdata [LANES];
-logic [3:0]  wmem [4][131072];
-logic [3:0]  wa_rdata [4];
+logic [3:0]  wmem [COPIES][131072];
+logic [3:0]  wa_rdata [COPIES];
+logic        vt_phase = 1'b0;  // VTRACE access cycle: 0 = lanes 4n,4n+1; 1 = 4n+2,4n+3
 
 assign core_world_req = tb_core_req | noise_core_req;
 assign core_addr      = tb_core_req ? tb_core_addr : noise_core_addr;
@@ -90,23 +102,32 @@ ddr_model u_ddr (
 world_remap #(.LANES(LANES)) u_remap (
   .clk, .win_x, .win_z, .slot_valid,
   .core_en(core_world_req), .core_addr, .core_paddr, .core_rdata_phys(wa_rdata[0]), .core_rdata,
-  .vt_addr, .vt_paddr, .vt_rdata_phys, .vt_rdata
+  .vt_addr(vt_addr_u), .vt_paddr, .vt_rdata_phys, .vt_rdata
 );
 
-// ---- world_mem model: 4 copies, port A (core / engine / VTRACE even lane), port B ----
+// ---- world_mem model: 2 copies, port A (VTRACE / core / engine), port B (VTRACE) ----
+// A VTRACE access holds vt_addr for WORLD_LATENCY = 2 cycles. In the first
+// cycle ports A and B of copy n read lanes 4n and 4n+1, in the second lanes
+// 4n+2 and 4n+3; every lane's data is valid after the second edge (world_remap
+// registers slot-valid every cycle, so it applies to the held address).
 always @(posedge clk) begin
-  for (int c = 0; c < 4; c++) begin
+  for (int c = 0; c < COPIES; c++) begin
+    int          la;
     logic [16:0] a;
     logic        we;
     logic [3:0]  d;
-    if (vtrace_busy)         begin a = vt_paddr[2*c]; we = 1'b0;    d = 4'd0;       end
-    else if (core_world_req) begin a = core_paddr;    we = core_we; d = core_wdata; end
-    else                     begin a = eng_addr;      we = eng_we;  d = eng_wdata;  end
+    la = 4 * c + (vt_phase ? 2 : 0);
+    if (vtrace_busy)         begin a = vt_paddr[la]; we = 1'b0;    d = 4'd0;       end
+    else if (core_world_req) begin a = core_paddr;   we = core_we; d = core_wdata; end
+    else                     begin a = eng_addr;     we = eng_we;  d = eng_wdata;  end
     wa_rdata[c] <= wmem[c][a];
-    vt_rdata_phys[2*c]   <= wmem[c][vt_paddr[2*c]];
-    vt_rdata_phys[2*c+1] <= wmem[c][vt_paddr[2*c+1]];
+    if (vtrace_busy) begin
+      vt_rdata_phys[la]     <= wmem[c][vt_paddr[la]];
+      vt_rdata_phys[la + 1] <= wmem[c][vt_paddr[la + 1]];
+    end
     if (we) wmem[c][a] <= d;
   end
+  vt_phase <= vtrace_busy && !vt_phase;
 end
 
 // The engine must never touch the world while VTRACE or the core own it.
@@ -117,14 +138,20 @@ always @(posedge clk) begin
 end
 
 // ---- interference: random VTRACE bursts and core world reads ----
-// vt_release > 0 drops vtrace_busy after that many core cycles.
+// vt_release > 0 drops vtrace_busy after that many core cycles, at the end of
+// a VTRACE access. Interference VTRACE addresses change once per access.
 bit interfere = 0;
 int vt_release = 0;
+bit vt_drop = 0;
 initial for (int l = 0; l < LANES; l++) vt_addr[l] = '0;
 always @(negedge clk) begin
   if (vt_release > 0) begin
     vt_release--;
-    if (vt_release == 0) vtrace_busy = 1'b0;
+    if (vt_release == 0) vt_drop = 1;
+  end
+  if (vt_drop && !vt_phase) begin
+    vtrace_busy = 1'b0;
+    vt_drop     = 0;
   end
   if (interfere && !rst) begin
     if (!vtrace_busy && !tb_core_hold && ($urandom % 64) == 0) begin
@@ -133,7 +160,8 @@ always @(negedge clk) begin
     end
     noise_core_req  = !vtrace_busy && ($urandom % 5) == 0;
     noise_core_addr = 17'($urandom);
-    for (int l = 0; l < LANES; l++) vt_addr[l] = 17'($urandom);
+    if (!vt_phase)
+      for (int l = 0; l < LANES; l++) vt_addr[l] = 17'($urandom);
   end else begin
     noise_core_req = 1'b0;
   end
@@ -258,14 +286,14 @@ function automatic logic [16:0] rel_addr(input int x, input int y, input int z);
   return {5'(y), 6'(z), 6'(x)};
 endfunction
 
-// Check all four copies of chunk (cx, cz)'s slot against its DDR3 image.
+// Check both copies of chunk (cx, cz)'s slot against its DDR3 image.
 task automatic check_slot_vs_ddr(input int cx, input int cz, input string what);
   for (int i = 0; i < 8192; i++) begin
     logic [3:0] exp;
     logic [16:0] pa;
     exp = ddr_block(cx, cz, i);
     pa  = phys(cx, cz, i % 16, i / 256, (i / 16) % 16);
-    for (int c = 0; c < 4; c++)
+    for (int c = 0; c < COPIES; c++)
       if (wmem[c][pa] !== exp)
         $fatal(1, "%s: chunk (%0d,%0d) block %0d copy %0d = %h, DDR3 has %h",
                what, cx, cz, i, c, wmem[c][pa], exp);

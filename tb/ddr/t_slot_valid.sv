@@ -4,7 +4,9 @@
 //  - With a 4 x 4 window loaded at corner chunk (5, 10) (WIN_ORIGIN x 16,
 //    z 32), reads through world_remap return the block only when the slot
 //    holding it is valid, for the core port and all 8 VTRACE lanes; each
-//    single slot, no slot, all slots and random masks.
+//    single slot, no slot, all slots and random masks. VTRACE reads take
+//    WORLD_LATENCY = 2 cycles: lanes 4n,4n+1 of copy n are checked after the
+//    first edge, all lanes after the second.
 //  - Core writes into an invalid slot still land and read back once valid.
 module t_slot_valid;
 `include "ddr_harness.svh"
@@ -37,20 +39,18 @@ module t_slot_valid;
   endtask
 
   task automatic check_vtrace(input logic [15:0] valid, input int n);
-    logic [16:0] prev [LANES];
     @(negedge clk) vtrace_busy = 1'b1;
-    for (int k = 0; k <= n; k++) begin
-      for (int l = 0; l < LANES; l++) begin
-        prev[l]    = vt_addr[l];
-        vt_addr[l] = 17'($urandom);
-      end
-      @(posedge clk); #1;
-      if (k > 0)
+    for (int k = 0; k < n; k++) begin
+      for (int l = 0; l < LANES; l++) vt_addr[l] = 17'($urandom);
+      for (int cy = 0; cy < WORLD_LATENCY; cy++) begin
+        if (vt_phase !== 1'(cy)) $fatal(1, "VTRACE access %0d cycle %0d in phase %0d", k, cy, vt_phase);
+        @(posedge clk); #1;
         for (int l = 0; l < LANES; l++)
-          if (vt_rdata[l] !== expect_rd(prev[l], valid))
-            $fatal(1, "VTRACE lane %0d rel %h valid %h = %h, want %h",
-                   l, prev[l], valid, vt_rdata[l], expect_rd(prev[l], valid));
-      @(negedge clk);
+          if ((l % 4) / 2 <= cy && vt_rdata[l] !== expect_rd(vt_addr[l], valid))
+            $fatal(1, "VTRACE lane %0d cycle %0d rel %h valid %h = %h, want %h",
+                   l, cy, vt_addr[l], valid, vt_rdata[l], expect_rd(vt_addr[l], valid));
+        @(negedge clk);
+      end
     end
     vtrace_busy = 1'b0;
   endtask

@@ -1,6 +1,6 @@
 // t_chunk_roundtrip: chunk_engine + ddr_bridge + ddr_model.
 //  1. LOAD chunks at the corners and middle of DDR3 into their slots, check
-//     all four world copies against DDR3, measure one LOAD.
+//     both world copies against DDR3, measure one LOAD.
 //  2. STORE a slot (copy 0 only), check DDR3, wipe the slot, LOAD it back.
 //  3. VTRACE busy pauses the engine; it resumes when busy drops.
 //  4. 12 back-to-back commands under random VTRACE/core interference: the
@@ -45,7 +45,7 @@ module t_chunk_roundtrip;
       pa = phys(5, 7, i % 16, i / 256, (i / 16) % 16);
       img[i] = 4'($urandom);
       wmem[0][pa] = img[i];
-      for (int c = 1; c < 4; c++) wmem[c][pa] = ~img[i];  // STORE must read copy 0
+      for (int c = 1; c < COPIES; c++) wmem[c][pa] = ~img[i];  // STORE must read copy 0
     end
     chunk_cmd(1, 5, 7, t, s);
     t0 = cyc;
@@ -60,7 +60,7 @@ module t_chunk_roundtrip;
       if (ddr_block(5, 7, i) !== img[i])
         $fatal(1, "STORE: block %0d in DDR3 = %h, slot had %h", i, ddr_block(5, 7, i), img[i]);
     for (int i = 0; i < 8192; i++)
-      for (int c = 0; c < 4; c++) wmem[c][phys(5, 7, i % 16, i / 256, (i / 16) % 16)] = 4'd0;
+      for (int c = 0; c < COPIES; c++) wmem[c][phys(5, 7, i % 16, i / 256, (i / 16) % 16)] = 4'd0;
     chunk_sync(0, 5, 7);
     check_slot_vs_ddr(5, 7, "STORE/LOAD roundtrip");
     // neighbours untouched by DDR traffic of (5,7)

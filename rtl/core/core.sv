@@ -23,9 +23,10 @@
 // Stage 2) are absent in this build and decode as illegal.
 //
 // Errors (Tai_2 sections 1 and 2). An illegal instruction (caught in ID), a
-// fetch outside instruction memory (ID) or a misaligned load/store (EX, before
-// any bus access) pulses err_set[ERR_ILLEGAL] with err_pc = the instruction's
-// PC and parks the FSM in HALT until reset: nothing is fetched or written.
+// fetch outside instruction memory or from a PC that is not 4-aligned (ID), or
+// a misaligned load/store (EX, before any bus access) pulses
+// err_set[ERR_ILLEGAL] with err_pc = the instruction's PC and parks the FSM in
+// HALT until reset: nothing is fetched or written.
 //
 // Buses. imem_rdata is the instruction BRAM output for imem_addr one cycle
 // earlier. On the data bus, bus_req is held until bus_ready; the access
@@ -104,7 +105,7 @@ module core
         .d_in(rf_wdata), .d_out1(rs1_raw), .d_out2(rs2_raw)
     );
 
-    assign id_fault = d_illegal || is_fetch_outside_imem(pc);
+    assign id_fault = d_illegal || is_fetch_outside_imem(pc) || is_fetch_misaligned(pc);
 
     // ID -> EX registers
     logic [3:0]  ex_alu_ctrl;

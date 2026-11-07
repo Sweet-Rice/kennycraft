@@ -9,10 +9,8 @@
 // the access held stable, until the engine takes it. Offsets are decoded from
 // addr[7:2]; offsets with no register read 0 and ignore writes.
 //
-// ERR and ERR_PC are not cleared by rst. The error halt lasts until reset
-// (the core leaves HALT and the error LED goes out), but the cause stays
-// readable afterwards until software writes 1 to clear it; otherwise the
-// write-1-to-clear access could never be observed. They power up as 0.
+// ERR and ERR_PC clear on rst. An error halts the core until reset, so the
+// cause is readable (e.g. by the testbench or a debugger) only while halted.
 //
 // Register writes use wdata as the LSU drives it (byte and halfword stores are
 // replicated across the word), so SB/SH/SW to a register offset all work.
@@ -67,9 +65,9 @@ module mmio
     logic [31:0] rdata_q;   // registered read data
 
     logic [31:0]          cycles;
-    logic [ERR_WIDTH-1:0] err    = '0;
+    logic [ERR_WIDTH-1:0] err;
     logic [ERR_WIDTH-1:0] err_clr;
-    logic [31:0]          err_pc = '0;
+    logic [31:0]          err_pc;
 
     assign off    = {addr, 2'b00};
     assign is_ddr = (off >= MMIO_DDR_STATUS) && (off <= MMIO_WIN_ORIGIN);
@@ -106,8 +104,13 @@ module mmio
 
     // ERR: write 1 to clear; a new error in the same cycle wins.
     always_ff @(posedge clk) begin
-        err <= (err & ~err_clr) | err_set;
-        if (err_set != '0) err_pc <= err_pc_in;
+        if (rst) begin
+            err    <= '0;
+            err_pc <= '0;
+        end else begin
+            err <= (err & ~err_clr) | err_set;
+            if (err_set != '0) err_pc <= err_pc_in;
+        end
     end
 
     // Read data, registered so it is valid the cycle after the access

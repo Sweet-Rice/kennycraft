@@ -1,12 +1,10 @@
 // Instruction decoder for the Stage 0 core: RV32I + Zmmul + custom-0 lane
 // control (Tai_2 section 1).
 //
-// illegal covers kc_isa_pkg::is_illegal (DIV/REM, the whole SYSTEM opcode,
-// reserved custom encodings, custom-1 without a ray unit), custom-2 when the
-// build has no divergence stack and custom-1 when it has no ray unit (the
-// "unit absent" rule; both are absent in Stage 0), unknown opcodes and
-// reserved funct3/funct7 values of the base ISA. FENCE and FENCE.I decode as
-// no-ops.
+// illegal is exactly kc_isa_pkg::is_illegal: every encoding Tai_2 section 1
+// does not define is illegal, plus custom-1/custom-2 when the build lacks the
+// ray unit / divergence stack (the "unit absent" rule; both are absent in
+// Stage 0). FENCE and FENCE.I decode as no-ops.
 //
 // alu_ctrl = {sub/sra, funct3} for OP and OP-IMM, and the compare the branch
 // needs for BRANCH (XOR for BEQ/BNE, SLT for BLT/BGE, SLTU for BLTU/BGEU).
@@ -56,7 +54,7 @@ module inst_decoder
         is_jalr    = 1'b0;
         is_lane    = 1'b0;
         uniform_wr = 1'b0;
-        illegal    = is_illegal(inst, HAS_RAY_UNIT);
+        illegal    = is_illegal(inst, HAS_RAY_UNIT, HAS_DIV_STACK);
 
         unique case (opc)
             OPC_LUI: begin
@@ -80,7 +78,6 @@ module inst_decoder
                 alu_b_sel = 2'b10;
                 imm_sig   = 3'b100;
                 is_jalr   = 1'b1;
-                if (f3 != 3'b000) illegal = 1'b1;
             end
             OPC_BRANCH: begin
                 alu_b_sel   = 2'b00;
@@ -88,48 +85,33 @@ module inst_decoder
                 is_branch   = 1'b1;
                 alu_ctrl[2] = ~(|f3[2:1]);   // BEQ/BNE -> XOR
                 alu_ctrl[1:0] = f3[2:1];     // BLT/BGE -> SLT, BLTU/BGEU -> SLTU
-                if (f3[2:1] == 2'b01) illegal = 1'b1;
             end
             OPC_LOAD: begin
                 r_we    = 1'b1;
                 imm_sig = 3'b100;
                 is_load = 1'b1;
-                if (f3 == 3'b011 || f3[2:1] == 2'b11) illegal = 1'b1;
             end
             OPC_STORE: begin
                 imm_sig  = 3'b101;
                 is_store = 1'b1;
-                if (f3[2] || f3 == 3'b011) illegal = 1'b1;
             end
             OPC_OP_IMM: begin
                 r_we     = 1'b1;
                 imm_sig  = 3'b100;
                 alu_ctrl = {f7[5] & (f3 == 3'b101), f3};
-                if (f3 == 3'b001 && f7 != F7_BASE) illegal = 1'b1;
-                if (f3 == 3'b101 && f7 != F7_BASE && f7 != F7_ALT) illegal = 1'b1;
             end
             OPC_OP: begin
                 r_we      = 1'b1;
                 alu_b_sel = 2'b00;
                 alu_ctrl  = {f7[5], f3};
-                unique case (f7)
-                    F7_BASE:   ;
-                    F7_ALT:    if (f3 != 3'b000 && f3 != 3'b101) illegal = 1'b1;
-                    F7_MULDIV: is_mul = 1'b1;   // DIV/REM caught by is_illegal
-                    default:   illegal = 1'b1;
-                endcase
+                is_mul    = (f7 == F7_MULDIV);
             end
-            OPC_MISC_MEM: begin
-                if (f3[2:1] != 2'b00) illegal = 1'b1;  // FENCE, FENCE.I: no-op
-            end
-            OPC_CUSTOM0: begin   // reserved encodings caught by is_illegal
+            OPC_CUSTOM0: begin
                 is_lane    = 1'b1;
                 r_we       = (f3 == F3_LANEID) || (f3 == F3_BALLOT) || (f3 == F3_MASKGET);
                 uniform_wr = (f3 == F3_BALLOT) || (f3 == F3_MASKGET);
             end
-            OPC_CUSTOM1: if (!HAS_RAY_UNIT)  illegal = 1'b1;
-            OPC_CUSTOM2: if (!HAS_DIV_STACK) illegal = 1'b1;
-            default: illegal = 1'b1;  // SYSTEM, unknown
+            default: ;   // MISC-MEM (FENCE no-op), custom-1/2 and illegal words
         endcase
     end
 

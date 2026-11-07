@@ -191,27 +191,32 @@ package kc_isa_pkg;
     // ------------------------------------------------------------------
     // Illegal instruction check (Tai_2 section 1)
     // ------------------------------------------------------------------
-    // Covers every case decidable from the instruction word alone:
-    //   - OP with funct7 0000001 and funct3 100..111 (DIV, DIVU, REM, REMU)
-    //   - the whole SYSTEM opcode (ECALL, EBREAK, every CSR instruction;
-    //     there is no Zicsr)
-    //   - custom-0 with funct3 010 or 100, or funct7 != 0
-    //   - custom-1 with funct3 011..111, VTRACE with funct7 != 0,
-    //     VGET with funct7 >= 2
-    //   - custom-2 with funct3 011..111
-    //   - any custom-1 instruction when the build has no ray unit
-    //     (has_ray_unit = 0, i.e. before Stage 2)
-    // Fields marked 0 in the encoding table (rd/rs1/rs2 of the custom
-    // instructions, funct7 of custom-2) are ignored and never make an
-    // instruction illegal.
+    // Whitelist: every encoding that Tai_2 section 1 does not explicitly
+    // define is illegal. Legal words are exactly:
+    //   - RV32I: LUI, AUIPC, JAL; JALR with funct3 000; BEQ/BNE/BLT/BGE/
+    //     BLTU/BGEU; LB/LH/LW/LBU/LHU; SB/SH/SW; the OP-IMM and OP ALU
+    //     operations with their defined funct7 (SLLI/SRLI funct7 0000000,
+    //     SRAI 0100000, SUB/SRA 0100000)
+    //   - Zmmul: OP with funct7 0000001 and funct3 000..011
+    //   - FENCE, FENCE.I (MISC-MEM funct3 000/001), executed as no-ops
+    //   - custom-0: funct7 0 and funct3 000, 001, 011, 101, 110, 111
+    //   - custom-1 (only when has_ray_unit): VSET with funct7 0..7, VTRACE
+    //     with funct7 0, VGET with funct7 0..1
+    //   - custom-2 (only when has_div_stack): funct3 000..010
+    // So DIV/DIVU/REM/REMU, the whole SYSTEM opcode (ECALL, EBREAK, CSR*),
+    // every other opcode (including 16-bit compressed words) and every
+    // reserved funct3/funct7 are illegal. Fields marked 0 in the custom
+    // encoding table (rd/rs1/rs2, custom-2 funct7) are ignored, as Tai_2
+    // states, and never make an instruction illegal.
     //
     // The remaining illegal cases depend on runtime state, not on the
-    // instruction word, and are checked with is_misaligned() and
-    // is_fetch_outside_imem() below.
+    // instruction word, and are checked with is_misaligned(),
+    // is_fetch_outside_imem() and is_fetch_misaligned() below.
     //
     // The interface is LANES-independent: one 32-bit word in, one bit out.
     function automatic logic is_illegal(input logic [31:0] instr,
-                                        input logic        has_ray_unit = 1'b0);
+                                        input logic        has_ray_unit  = 1'b0,
+                                        input logic        has_div_stack = 1'b1);
         logic [6:0] opc;
         logic [2:0] f3;
         logic [6:0] f7;
@@ -219,17 +224,37 @@ package kc_isa_pkg;
         opc = instr[6:0];
         f3  = instr[14:12];
         f7  = instr[31:25];
-        ill = 1'b0;
         unique case (opc)
+            OPC_LUI, OPC_AUIPC, OPC_JAL:
+                ill = 1'b0;
+            OPC_JALR:
+                ill = (f3 != 3'b000);
+            OPC_BRANCH:
+                ill = (f3 == 3'b010) || (f3 == 3'b011);
+            OPC_LOAD:
+                ill = (f3 == 3'b011) || (f3 == 3'b110) || (f3 == 3'b111);
+            OPC_STORE:
+                ill = (f3 > 3'b010);
+            OPC_OP_IMM:
+                unique case (f3)
+                    3'b001:  ill = (f7 != F7_BASE);                     // SLLI
+                    3'b101:  ill = (f7 != F7_BASE) && (f7 != F7_ALT);   // SRLI, SRAI
+                    default: ill = 1'b0;
+                endcase
             OPC_OP:
-                ill = (f7 == F7_MULDIV) && f3[2];
-            OPC_SYSTEM:
-                ill = 1'b1;
+                unique case (f7)
+                    F7_BASE:   ill = 1'b0;
+                    F7_ALT:    ill = (f3 != 3'b000) && (f3 != 3'b101);  // SUB, SRA
+                    F7_MULDIV: ill = f3[2];                             // DIV/REM
+                    default:   ill = 1'b1;
+                endcase
+            OPC_MISC_MEM:
+                ill = (f3[2:1] != 2'b00);                               // FENCE, FENCE.I
             OPC_CUSTOM0:
                 ill = (f3 == 3'b010) || (f3 == 3'b100) || (f7 != 7'd0);
             OPC_CUSTOM1: begin
                 unique case (f3)
-                    F3_VSET:   ill = 1'b0;
+                    F3_VSET:   ill = (f7 > VSET_STEP_SIGN);
                     F3_VTRACE: ill = (f7 != 7'd0);
                     F3_VGET:   ill = (f7 >= 7'(VGET_NUM_FIELDS));
                     default:   ill = 1'b1;
@@ -237,9 +262,9 @@ package kc_isa_pkg;
                 if (!has_ray_unit) ill = 1'b1;
             end
             OPC_CUSTOM2:
-                ill = (f3 > F3_DENDIF);
-            default:
-                ill = 1'b0;
+                ill = (f3 > F3_DENDIF) || !has_div_stack;
+            default:                                                    // SYSTEM and everything undefined
+                ill = 1'b1;
         endcase
         return ill;
     endfunction
@@ -258,6 +283,12 @@ package kc_isa_pkg;
     // Fetch outside instruction memory (0x0000_0000 to 0x0000_7FFF).
     function automatic logic is_fetch_outside_imem(input logic [31:0] pc);
         return pc >= (IMEM_BASE + IMEM_BYTES);
+    endfunction
+
+    // Fetch from a PC that is not 4-aligned (a JALR, JAL or branch target
+    // with bit 1 set). There are no compressed instructions.
+    function automatic logic is_fetch_misaligned(input logic [31:0] pc);
+        return pc[1:0] != 2'b00;
     endfunction
 
 endpackage

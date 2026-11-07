@@ -2,12 +2,15 @@
    (Tai_2 sections 1 and 2): DIV, ECALL, a CSR read, a misaligned LW and VGET
    field 2, plus the other DIV/REM forms, EBREAK, misaligned LH/SW/SH, a
    reserved custom-0 encoding, custom-1/custom-2 instructions whose unit is
-   absent in Stage 0, an all-zero word and a fetch outside instruction memory. The testbench writes the case number to
-   TB_SELECT and resets the core once per case. Case k sits at 0x100 + 0x40*k
-   with the faulting instruction first in its slot (case 15 faults at 0x8000).
-   Case 17 is the legal control: FENCE/FENCE.I run, ERR/ERR_PC still hold the
-   previous case's error after reset, ERR clears on write 1, unmapped and
-   imem-region data accesses read 0 without an error. */
+   absent in Stage 0, an all-zero word, a fetch outside instruction memory, a
+   fetch from a PC that is not 4-aligned, an undefined opcode (FLW), an
+   undefined OP funct7 and an undefined LOAD funct3 (LD). Anything Tai_2 does
+   not define is illegal. The testbench writes the case number to TB_SELECT
+   and resets the core once per case. Case k sits at 0x100 + 0x40*k with the
+   faulting instruction first in its slot (case 15 faults at 0x8000, case 17
+   at 0x542). Case 21 is the legal control: FENCE/FENCE.I run, reset has
+   cleared ERR/ERR_PC, unmapped and imem-region data accesses read 0 without
+   an error. */
 #include "kc_test.h"
 
     /* DIV/REM and FENCE.I are not in rv32i_zmmul; assemble them anyway. */
@@ -81,18 +84,26 @@ _start:
     .org 0x500                  /* 16: all-zero word (not an RV32I instruction) */
     .word  0
     NOT_REACHED
-    .org 0x540                  /* 17: legal control */
+    .org 0x540                  /* 17: fetch from a PC with bit 1 set */
+    li     a3, 0x542
+    jr     a3
+    .org 0x580                  /* 18: undefined opcode 0x07 (flw a2, 0(a1)) */
+    .insn i 0x07, 2, a2, 0(a1)
+    NOT_REACHED
+    .org 0x5c0                  /* 19: OP with undefined funct7 0x10 */
+    .insn r 0x33, 0, 0x10, a2, a0, a1
+    NOT_REACHED
+    .org 0x600                  /* 20: LOAD with undefined funct3 011 (ld) */
+    .insn i 0x03, 3, a2, 0(t0)
+    NOT_REACHED
+    .org 0x640                  /* 21: legal control */
     fence
     fence.i
     li     s0, MMIO_BASE
     lw     a4, MMIO_ERR(s0)
-    sw     a4, 0xE0(t0)         /* ERR left by the previous case */
+    sw     a4, 0xE0(t0)         /* ERR after reset */
     lw     a4, MMIO_ERR_PC(s0)
-    sw     a4, 0xE4(t0)
-    li     a4, 7
-    sw     a4, MMIO_ERR(s0)     /* write 1 to clear */
-    lw     a4, MMIO_ERR(s0)
-    sw     a4, 0xE8(t0)
+    sw     a4, 0xE4(t0)         /* ERR_PC after reset */
     li     a5, 0x70000000
     sw     a4, 0(a5)            /* unmapped: dropped */
     lw     a4, 0(a5)

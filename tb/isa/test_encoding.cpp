@@ -4,10 +4,12 @@
 //    decode to the table's opcode, funct3, funct7, rd, rs1, rs2 and B-type
 //    immediate, the hex rebuilt from those fields must equal the example hex,
 //    and is_illegal must be 0.
-// 2. Every case of the "Illegal custom encodings" list and the illegal base
-//    ISA words (DIV family, ECALL, EBREAK, CSR): is_illegal must be 1.
-// 3. Exhaustive sweep of opcode x funct3 x funct7 x has_ray_unit for the
-//    three custom opcodes against a reference model written from the list.
+// 2. Named illegal and legal cases: the "Illegal custom encodings" list, the
+//    illegal base ISA words (DIV family, ECALL, EBREAK, CSR) and encodings
+//    Tai_2 never defines (undefined opcodes, funct3, funct7), which are
+//    illegal because anything not explicitly defined is illegal.
+// 3. Exhaustive sweep of every opcode x funct3 x funct7 x has_ray_unit x
+//    has_div_stack against a reference model written from Tai_2 section 1.
 //
 // Exits 0 only if every check passes.
 
@@ -25,9 +27,10 @@ int g_checks = 0;
 
 std::unique_ptr<Visa_decode_check> dut;
 
-void apply(uint32_t instr, bool has_ray) {
+void apply(uint32_t instr, bool has_ray, bool has_div = true) {
     dut->instr = instr;
     dut->has_ray_unit = has_ray;
+    dut->has_div_stack = has_div;
     dut->eval();
 }
 
@@ -131,18 +134,34 @@ void check_table() {
     }
 }
 
-// Reference model of the "Illegal custom encodings" list (Tai_2 section 1).
-bool ref_custom_illegal(uint32_t op, uint32_t f3, uint32_t f7, bool ray) {
+// Reference model of Tai_2 section 1: everything it does not define is
+// illegal. Fields marked 0 in the custom table are ignored.
+bool ref_illegal(uint32_t op, uint32_t f3, uint32_t f7, bool ray, bool div) {
     switch (op) {
+    case 0x37: case 0x17: case 0x6F: return false;          // LUI, AUIPC, JAL
+    case 0x67: return f3 != 0;                               // JALR
+    case 0x63: return f3 == 2 || f3 == 3;                    // BRANCH
+    case 0x03: return f3 == 3 || f3 == 6 || f3 == 7;         // LOAD
+    case 0x23: return f3 > 2;                                // STORE
+    case 0x13:                                               // OP-IMM
+        if (f3 == 1) return f7 != 0;                         // SLLI
+        if (f3 == 5) return f7 != 0 && f7 != 0x20;           // SRLI, SRAI
+        return false;
+    case 0x33:                                               // OP
+        if (f7 == 0) return false;
+        if (f7 == 0x20) return f3 != 0 && f3 != 5;           // SUB, SRA
+        if (f7 == 1) return f3 >= 4;                         // Zmmul; DIV/REM
+        return true;
+    case 0x0F: return f3 > 1;                                // FENCE, FENCE.I
     case 0x0B: return f3 == 2 || f3 == 4 || f7 != 0;
     case 0x2B:
         if (!ray) return true;
         if (f3 >= 3) return true;
+        if (f3 == 0) return f7 >= 8;                         // VSET fields 0..7
         if (f3 == 1) return f7 != 0;
-        if (f3 == 2) return f7 >= 2;
-        return false;  // VSET: the list names no funct7 restriction
-    case 0x5B: return f3 >= 3;
-    default: return false;
+        return f7 >= 2;                                      // VGET fields 0..1
+    case 0x5B: return f3 >= 3 || !div;
+    default: return true;                                    // SYSTEM and undefined
     }
 }
 
@@ -208,6 +227,28 @@ void check_illegal_list() {
         {"DELSE_JUNK", enc_b(0x5B, 1, 31, 31, -8), false, false},
         {"VSET_F7", enc_r(0x2B, 0, 7, 0, A1, 0), true, false},
         {"VGET_F0", enc_r(0x2B, 2, 0, A0, 0, 0), true, false},
+        // Not defined by Tai_2, so illegal
+        {"VSET_F8",   enc_r(0x2B, 0, 8, 0, A1, 0), true, true},
+        {"VSET_F127", enc_r(0x2B, 0, 127, 0, A1, 0), true, true},
+        {"ZERO",      0x00000000, true, true},
+        {"C.LI",      0x00004505, true, true},              // 16-bit word
+        {"FLW",       0x0005A507, true, true},              // opcode 0x07
+        {"AMOADD.W",  0x00B5A52F, true, true},              // opcode 0x2F
+        {"OP_F7_10",  enc_r(0x33, 0, 0x10, A0, A1, A0), true, true},
+        {"SLT_F7_20", enc_r(0x33, 2, 0x20, A0, A1, A0), true, true},
+        {"LD",        0x0005B503, true, true},              // LOAD funct3 011
+        {"LOAD_F3_6", 0x0005E503, true, true},
+        {"SD",        0x00A5B023, true, true},              // STORE funct3 011
+        {"JALR_F3_1", 0x000590E7, true, true},
+        {"BR_F3_2",   0x00B52463, true, true},
+        {"SLLI_F7_20", 0x40159513, true, true},
+        {"SRLI_F7_10", 0x2015D513, true, true},
+        {"MISC_F3_2", 0x0000200F, true, true},
+        // Legal neighbours of the new cases
+        {"SRAI",      0x4015D513, true, false},
+        {"SLLI",      0x00159513, true, false},
+        {"LHU",       0x0005D503, true, false},
+        {"BGEU",      0x00B57463, true, false},
     };
     for (const Case& c : cases) {
         const char* name = c.name;
@@ -218,22 +259,23 @@ void check_illegal_list() {
     std::printf("illegal list: %zu named cases checked\n", sizeof(cases) / sizeof(cases[0]));
 }
 
-void sweep_custom() {
-    const uint32_t ops[] = {0x0B, 0x2B, 0x5B};
+void sweep_all() {
     const uint32_t junk[] = {0, A0, 31};
     unsigned n = 0;
-    for (uint32_t op : ops)
+    for (uint32_t op = 0; op < 128; ++op)
         for (uint32_t f3 = 0; f3 < 8; ++f3)
             for (uint32_t f7 = 0; f7 < 128; ++f7)
                 for (uint32_t j : junk)
-                    for (int ray = 0; ray < 2; ++ray) {
+                    for (int unit = 0; unit < 4; ++unit) {
+                        const bool ray = unit & 1;
+                        const bool div = unit & 2;
                         const char* name = "sweep";
                         const uint32_t instr = enc_r(op, f3, f7, j, j ^ 1, j ^ 2);
-                        apply(instr, ray);
-                        EXPECT_EQ(illegal, ref_custom_illegal(op, f3, f7, ray));
+                        apply(instr, ray, div);
+                        EXPECT_EQ(illegal, ref_illegal(op, f3, f7, ray, div));
                         ++n;
                     }
-    std::printf("custom sweep: %u encodings checked\n", n);
+    std::printf("full sweep: %u encodings checked\n", n);
 }
 
 }  // namespace
@@ -246,7 +288,7 @@ int main(int argc, char** argv) {
 
     check_table();
     check_illegal_list();
-    sweep_custom();
+    sweep_all();
 
     dut->final();
     dut.reset();  // the model must die before its context

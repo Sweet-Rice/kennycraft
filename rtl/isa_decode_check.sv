@@ -10,6 +10,7 @@ module isa_decode_check
 (
     input  logic [31:0] instr,
     input  logic        has_ray_unit,
+    input  logic        has_div_stack,
     output logic [6:0]  opcode,
     output logic [2:0]  funct3,
     output logic [6:0]  funct7,
@@ -30,7 +31,7 @@ module isa_decode_check
     assign rs1     = instr_rs1(instr);
     assign rs2     = instr_rs2(instr);
     assign b_imm   = imm_b(instr);
-    assign illegal = is_illegal(instr, has_ray_unit);
+    assign illegal = is_illegal(instr, has_ray_unit, has_div_stack);
 
     assign is_custom = (opcode == OPC_CUSTOM0) || (opcode == OPC_CUSTOM1)
                     || (opcode == OPC_CUSTOM2);

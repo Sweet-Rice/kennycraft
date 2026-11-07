@@ -1,8 +1,8 @@
 /* t_illegal: every illegal case halts with ERR.ILLEGAL and the right ERR_PC
    (Tai_2 sections 1 and 2): DIV, ECALL, a CSR read, a misaligned LW and VGET
-   field 2, plus the other DIV/REM forms, EBREAK, misaligned LH/SW/SH, custom
-   instructions whose unit is absent in Stage 0, an all-zero word and a fetch
-   outside instruction memory. The testbench writes the case number to
+   field 2, plus the other DIV/REM forms, EBREAK, misaligned LH/SW/SH, a
+   reserved custom-0 encoding, custom-1/custom-2 instructions whose unit is
+   absent in Stage 0, an all-zero word and a fetch outside instruction memory. The testbench writes the case number to
    TB_SELECT and resets the core once per case. Case k sits at 0x100 + 0x40*k
    with the faulting instruction first in its slot (case 15 faults at 0x8000).
    Case 17 is the legal control: FENCE/FENCE.I run, ERR/ERR_PC still hold the
@@ -69,8 +69,8 @@ _start:
     .org 0x400                  /* 12: VTRACE, legal encoding, no ray unit in Stage 0 */
     .insn r 0x2B, 1, 0, a2, a1, x0
     NOT_REACHED
-    .org 0x440                  /* 13: LANEID, no lane-control unit in Stage 0 */
-    .insn r 0x0B, 0, 0, a2, x0, x0
+    .org 0x440                  /* 13: custom-0 funct3 010 (reserved) */
+    .insn r 0x0B, 2, 0, a2, x0, x0
     NOT_REACHED
     .org 0x480                  /* 14: DENDIF, no divergence unit in Stage 0 */
     .insn r 0x5B, 2, 0, x0, x0, x0

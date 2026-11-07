@@ -60,6 +60,8 @@ _start:
     MEASURE 20, lw a0, 0(s4)
     MEASURE 21, sb a0, 7(s5)
     MEASURE 22, fence
+    MEASURE 23, .insn r 0x0B, 5, 0, a0, x0, x0   /* MASKGET */
+    MEASURE 24, .insn r 0x0B, 7, 0, x0, x0, x0   /* MASKALL */
 
     li    t0, 1
     li    t1, TB_DONE
@@ -68,6 +70,6 @@ _start:
 
     .data
 results:
-    .space 4 * 23
+    .space 4 * 25
 scratch:
     .space 16

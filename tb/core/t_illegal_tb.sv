@@ -24,7 +24,7 @@ module t_illegal_tb;
             6: return "CSR read";   7: return "misaligned LW";
             8: return "misaligned LH";  9: return "misaligned SW";
             10: return "misaligned SH"; 11: return "VGET field 2";
-            12: return "VTRACE (no ray unit)"; 13: return "LANEID (Stage 0)";
+            12: return "VTRACE (no ray unit)"; 13: return "custom-0 funct3 010";
             14: return "DENDIF (Stage 0)";     15: return "fetch outside imem";
             16: return "all-zero word";
             default: return "?";

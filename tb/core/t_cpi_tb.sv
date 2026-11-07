@@ -7,7 +7,7 @@ module t_cpi_tb;
     `include "soc_harness.svh"
 
     localparam int          N       = 32;
-    localparam int          NSLOTS  = 23;
+    localparam int          NSLOTS  = 25;
     localparam logic [31:0] RESULTS = 32'h1000_0100;
 
     function automatic string slot_name(input int k);
@@ -23,6 +23,7 @@ module t_cpi_tb;
             17: return "load LW world";       18: return "store SB world";
             19: return "store SW world";      20: return "load LW textures";
             21: return "store SB framebuffer"; 22: return "FENCE";
+            23: return "lane ctl (MASKGET)"; 24: return "lane ctl (MASKALL)";
             default: return "?";
         endcase
     endfunction

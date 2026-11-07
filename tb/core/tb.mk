@@ -3,7 +3,8 @@
 #
 #   tb-core-datapath_tb     directed tests poked into imem
 #   tb-core-program_mem_tb  tb/core/program.mem (mkprog.py) through $readmemh
-#   tb-core-t_zmmul, tb-core-t_uart, tb-core-t_illegal, tb-core-t_mmio, tb-core-t_cpi
+#   tb-core-t_zmmul, tb-core-t_uart, tb-core-t_illegal, tb-core-t_mmio,
+#   tb-core-t_lanectl, tb-core-t_cpi
 #                           programs in tb/core/sw/*.S, assembled with the
 #                           RISC-V GCC, loaded as kc_imem/kc_dmem images
 #   lint-core               verilator -Wall over rtl/core, rtl/mem, rtl/soc
@@ -19,7 +20,7 @@ CORE_SW_OBJ   := $(OBJ)/core_sw
 CORE_RTL  := rtl/kc_isa_pkg.sv $(wildcard rtl/core/*.sv) $(wildcard rtl/mem/*.sv) \
              $(wildcard rtl/soc/*.sv)
 CORE_TBS  := datapath_tb program_mem_tb
-CORE_PROG := t_zmmul t_uart t_illegal t_mmio t_cpi
+CORE_PROG := t_zmmul t_uart t_illegal t_mmio t_lanectl t_cpi
 PLUSARGS  ?=
 
 TB_TARGETS += $(addprefix tb-core-,$(CORE_TBS) $(CORE_PROG)) lint-core

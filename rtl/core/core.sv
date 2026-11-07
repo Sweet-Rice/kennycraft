@@ -1,4 +1,5 @@
-// KennyCraft core, Stage 0: multi-cycle RV32I + Zmmul, LANES = 1 (D7).
+// KennyCraft core, Stage 0: multi-cycle RV32I + Zmmul + custom-0 lane
+// control, LANES = 1 (D7).
 //
 // Grown from Tai's multicycle core (datapath.sv in RISC-V-Core-progression).
 // No pipeline registers, no forwarding, no hazard logic. One FSM walks every
@@ -10,6 +11,16 @@
 //   MUL   second EXECUTE cycle for MUL family (registered product) 1
 //   MEM   one bus access; stores retire here                       1 + slave wait
 //   WB    write rd (load data arrives here), update PC             1
+//
+// Lane control (custom-0, Tai_2 sections 1 and 2, "Width with LANES < 8").
+// One shared LANES-bit active mask, reset to 1. LANEID returns 0, LMASK
+// clears the bit when rs1 = 0, MASKSET keeps rs1[LANES-1:0] of the scalar
+// lane (lane 0), MASKALL sets every bit, BALLOT and MASKGET write rd in every
+// lane, zero-extended. With the lane inactive, rd writes (ALU, LUI, AUIPC,
+// MUL, loads, JAL/JALR links, LANEID) and loads/stores are suppressed (no bus
+// access, so no misaligned error either); branches and jumps still take lane
+// 0's outcome. custom-2 (divergence stack, P5) and custom-1 (ray unit,
+// Stage 2) are absent in this build and decode as illegal.
 //
 // Errors (Tai_2 sections 1 and 2). An illegal instruction (caught in ID), a
 // fetch outside instruction memory (ID) or a misaligned load/store (EX, before
@@ -23,8 +34,10 @@
 module core
     import kc_isa_pkg::*;
 #(
-    parameter int          LANES     = 1,
-    parameter logic [31:0] RESET_VEC = IMEM_BASE
+    parameter int          LANES         = 1,
+    parameter logic [31:0] RESET_VEC     = IMEM_BASE,
+    parameter bit          HAS_DIV_STACK = 1'b0,
+    parameter bit          HAS_RAY_UNIT  = 1'b0
 ) (
     input  logic                 clk,
     input  logic                 rst,
@@ -49,6 +62,9 @@ module core
     if (LANES != 1) begin : g_lanes_check
         $error("core: Stage 0 implements LANES = 1 only");
     end
+    if (HAS_DIV_STACK || HAS_RAY_UNIT) begin : g_unit_check
+        $error("core: the divergence stack and the ray unit are not built yet");
+    end
 
     typedef enum logic [2:0] {
         S_IF, S_ID, S_EX, S_MUL, S_MEM, S_WB, S_HALT
@@ -61,18 +77,19 @@ module core
     // ------------------------------------------------------------------
     logic [3:0]  d_alu_ctrl;
     logic        d_alu_a_pc, d_r_we, d_res_imm, d_is_load, d_is_store, d_is_mul;
-    logic        d_is_branch, d_is_jal, d_is_jalr, d_illegal;
+    logic        d_is_branch, d_is_jal, d_is_jalr, d_is_lane, d_uniform_wr, d_illegal;
     logic [1:0]  d_alu_b_sel;
     logic [2:0]  d_imm_sig;
     logic [31:0] d_imm, rs1_raw, rs2_raw;
     logic        id_fault;
 
-    inst_decoder u_dec (
+    inst_decoder #(.HAS_DIV_STACK(HAS_DIV_STACK), .HAS_RAY_UNIT(HAS_RAY_UNIT)) u_dec (
         .inst(imem_rdata), .alu_ctrl(d_alu_ctrl), .alu_a_pc(d_alu_a_pc),
         .alu_b_sel(d_alu_b_sel), .imm_sig(d_imm_sig), .r_we(d_r_we),
         .res_imm(d_res_imm), .is_load(d_is_load), .is_store(d_is_store),
         .is_mul(d_is_mul), .is_branch(d_is_branch), .is_jal(d_is_jal),
-        .is_jalr(d_is_jalr), .illegal(d_illegal)
+        .is_jalr(d_is_jalr), .is_lane(d_is_lane), .uniform_wr(d_uniform_wr),
+        .illegal(d_illegal)
     );
 
     immgen u_imm (.inst(imem_rdata[31:7]), .imm_sig(d_imm_sig), .imm(d_imm));
@@ -92,7 +109,7 @@ module core
     // ID -> EX registers
     logic [3:0]  ex_alu_ctrl;
     logic        ex_alu_a_pc, ex_r_we, ex_res_imm, ex_is_load, ex_is_store, ex_is_mul;
-    logic        ex_is_branch, ex_is_jal, ex_is_jalr;
+    logic        ex_is_branch, ex_is_jal, ex_is_jalr, ex_is_lane, ex_uniform_wr;
     logic [1:0]  ex_alu_b_sel;
     logic [2:0]  ex_funct3;
     logic [31:0] ex_imm, ex_rs1, ex_rs2;
@@ -112,6 +129,8 @@ module core
             ex_is_branch <= d_is_branch;
             ex_is_jal    <= d_is_jal;
             ex_is_jalr   <= d_is_jalr;
+            ex_is_lane   <= d_is_lane;
+            ex_uniform_wr <= d_uniform_wr;
             ex_funct3    <= instr_funct3(imem_rdata);
             ex_rd        <= instr_rd(imem_rdata);
             ex_imm       <= d_imm;
@@ -151,6 +170,46 @@ module core
         .a(ex_rs1), .b(ex_rs2), .result(mul_y)
     );
 
+    // Lane control: the active mask and the custom-0 results
+    logic [LANES-1:0] mask, mask_d;
+    logic [LANES-1:0] nonzero;     // per lane: rs1 != 0
+    logic             mask_we;
+    logic             active;      // lane 0 is active
+    logic [31:0]      lane_y;
+
+    assign active  = mask[0];
+    assign nonzero = LANES'(ex_rs1 != 32'd0);
+
+    always_comb begin
+        lane_y  = 32'd0;
+        mask_d  = mask;
+        mask_we = 1'b0;
+        if (ex_is_lane) begin
+            unique case (ex_funct3)
+                F3_LMASK: begin
+                    mask_d  = mask & nonzero;
+                    mask_we = 1'b1;
+                end
+                F3_BALLOT:  lane_y = {{(32-LANES){1'b0}}, mask & nonzero};
+                F3_MASKGET: lane_y = {{(32-LANES){1'b0}}, mask};
+                F3_MASKSET: begin
+                    mask_d  = ex_rs1[LANES-1:0];
+                    mask_we = 1'b1;
+                end
+                F3_MASKALL: begin
+                    mask_d  = '1;
+                    mask_we = 1'b1;
+                end
+                default: lane_y = 32'd0;   // LANEID: lane 0
+            endcase
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (rst)                               mask <= LANES'(1);
+        else if (state == S_EX && mask_we)     mask <= mask_d;
+    end
+
     // EX -> MEM/WB registers
     logic [31:0] res;        // rd value (ALU, LUI immediate, link, product) or bus address
     logic [31:0] next_pc;
@@ -166,7 +225,7 @@ module core
 
     always_ff @(posedge clk) begin
         if (state == S_EX) begin
-            res        <= ex_res_imm ? ex_imm : alu_y;
+            res        <= ex_res_imm ? ex_imm : (ex_is_lane ? lane_y : alu_y);
             next_pc    <= take ? target : pc + 32'd4;
             bus_be     <= st_be;
             bus_wdata  <= st_wdata;
@@ -184,14 +243,15 @@ module core
     // ------------------------------------------------------------------
     // WB
     // ------------------------------------------------------------------
-    assign rf_we    = (state == S_WB) && ex_r_we;
+    assign rf_we    = (state == S_WB) && ex_r_we && (active || ex_uniform_wr);
     assign rf_wdata = ex_is_load ? ld_value : res;
 
     // ------------------------------------------------------------------
     // FSM, PC and errors
     // ------------------------------------------------------------------
-    logic ex_fault;
-    assign ex_fault = (ex_is_load || ex_is_store) && misaligned;
+    logic ex_mem, ex_fault;
+    assign ex_mem   = (ex_is_load || ex_is_store) && active;
+    assign ex_fault = ex_mem && misaligned;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -204,7 +264,7 @@ module core
                 S_EX: begin
                     if (ex_fault)                        state <= S_HALT;
                     else if (ex_is_mul)                  state <= S_MUL;
-                    else if (ex_is_load || ex_is_store)  state <= S_MEM;
+                    else if (ex_mem)                     state <= S_MEM;
                     else                                 state <= S_WB;
                 end
                 S_MUL: state <= S_WB;
@@ -240,7 +300,7 @@ module core
     // Retire observation wires for Verilator harnesses and traces (not used
     // by any logic). One retire per instruction: stores in the cycle the bus
     // accepts them, everything else in WB. A halting instruction never
-    // retires. retire_mask is the active mask, all ones until Stage 1.
+    // retires. retire_mask is the active mask at retirement.
     // ------------------------------------------------------------------
     /* verilator lint_off UNUSEDSIGNAL */
     logic             retire_valid;
@@ -258,6 +318,6 @@ module core
     assign retire_rd_we    = rf_we;
     assign retire_rd_addr  = ex_rd;
     assign retire_rd_wdata = rf_wdata;
-    assign retire_mask     = '1;
+    assign retire_mask     = mask;
 
 endmodule

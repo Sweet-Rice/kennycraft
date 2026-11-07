@@ -11,6 +11,7 @@ VL_LINT   ?= --lint-only -Wall
 OBJ       := obj_dir
 
 TB_TARGETS :=
+RISCV_PREFIX ?= $(CROSS)
 include $(wildcard tb/*/tb.mk)
 
 include mk/bench.mk

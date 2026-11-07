@@ -1,0 +1,8 @@
+obj_dir/
+build/.mcp/
+build/out/
+.Xil/
+*.jou
+vivado*.log
+vivado*.str
+__pycache__/

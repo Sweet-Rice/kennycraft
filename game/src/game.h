@@ -1,0 +1,43 @@
+// game.h — KennyCraft game logic. Runs on lane 0 (mask = 0x01). Chip-safe C:
+// no floats, no division, no malloc, fixed-size state.
+#ifndef KC_GAME_H
+#define KC_GAME_H
+#include <stdint.h>
+#include "fixed.h"
+
+// Key codes (Interfaces, Key byte): bit 7 = down, bits 6:0 = code.
+#define KEY_W 0x77
+#define KEY_A 0x61
+#define KEY_S 0x73
+#define KEY_D 0x64
+#define KEY_SPACE 0x20
+#define KEY_LEFT  0x10
+#define KEY_RIGHT 0x11
+#define KEY_UP    0x12
+#define KEY_DOWN  0x13
+#define KEY_BREAK 0x6A   // J
+#define KEY_PLACE 0x6B   // K
+
+typedef struct {
+    q16 pos[3];          // feet center, absolute blocks
+    q16 vel_y;
+    q16 yaw, pitch;      // Q16 angle units (1024 per turn)
+    int32_t on_ground;
+    int32_t selected;    // hotbar slot 0..8
+    uint32_t held;       // bitmask of held movement/look keys
+    int32_t aim_hit;     // aimed block (absolute) valid?
+    int32_t aim[3], place[3];
+    int32_t want_break, want_place;   // set by keys, applied in pick_and_edit()
+} kc_player;
+
+extern kc_player kc_me;
+
+// Frame loop pieces, in the order of issue #2.
+void game_init(void);              // spawn + first world_update (generates the window)
+void read_keys(void);              // drain UART_RX
+void move_player(q16 dt);          // look, walk, gravity, collisions (dt in seconds, Q16)
+void pick_and_edit(void);          // aim with the DDA, apply J / K
+void write_camera(void);           // camera block (absolute coords) + render params
+void game_draw_overlay(void);      // crosshair + hotbar into the back framebuffer
+
+#endif

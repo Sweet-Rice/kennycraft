@@ -96,9 +96,11 @@ module core
     logic [1:0]  ex_alu_b_sel;
     logic [2:0]  ex_funct3;
     logic [31:0] ex_imm, ex_rs1, ex_rs2;
+    logic [31:0] ir;          // instruction in flight, for the retire wires
 
     always_ff @(posedge clk) begin
         if (state == S_ID) begin
+            ir           <= imem_rdata;
             ex_alu_ctrl  <= d_alu_ctrl;
             ex_alu_a_pc  <= d_alu_a_pc;
             ex_alu_b_sel <= d_alu_b_sel;
@@ -233,5 +235,29 @@ module core
         err_set = '0;
         err_set[ERR_ILLEGAL] = ((state == S_ID) && id_fault) || ((state == S_EX) && ex_fault);
     end
+
+    // ------------------------------------------------------------------
+    // Retire observation wires for Verilator harnesses and traces (not used
+    // by any logic). One retire per instruction: stores in the cycle the bus
+    // accepts them, everything else in WB. A halting instruction never
+    // retires. retire_mask is the active mask, all ones until Stage 1.
+    // ------------------------------------------------------------------
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic             retire_valid;
+    logic [31:0]      retire_pc;
+    logic [31:0]      retire_inst;
+    logic             retire_rd_we;
+    logic [4:0]       retire_rd_addr;
+    logic [31:0]      retire_rd_wdata;
+    logic [LANES-1:0] retire_mask;
+    /* verilator lint_on UNUSEDSIGNAL */
+
+    assign retire_valid    = (state == S_WB) || ((state == S_MEM) && bus_ready && ex_is_store);
+    assign retire_pc       = pc;
+    assign retire_inst     = ir;
+    assign retire_rd_we    = rf_we;
+    assign retire_rd_addr  = ex_rd;
+    assign retire_rd_wdata = rf_wdata;
+    assign retire_mask     = '1;
 
 endmodule

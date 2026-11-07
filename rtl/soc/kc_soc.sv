@@ -48,12 +48,12 @@ module kc_soc
     output logic        fb_mode,
 
     // Chunk engine registers (P2b)
-    output logic        ddr_reg_req,
+    output logic        ddr_reg_en,
     output logic        ddr_reg_we,
-    output logic [5:0]  ddr_reg_addr,
+    output logic [5:0]  ddr_reg_off,
     output logic [31:0] ddr_reg_wdata,
-    input  logic        ddr_reg_ready,
     input  logic [31:0] ddr_reg_rdata,
+    input  logic        ddr_reg_stall,
 
     // World window port (used when EXT_WORLD = 1)
     output logic        world_req,
@@ -184,8 +184,8 @@ module kc_soc
         .uart_rx_pop(rx_pop), .uart_rx_avail(rx_avail), .uart_rx_data(rx_data),
         .swap_req, .swap_pending, .vblank, .frame_count, .fb_mode,
         .leds,
-        .ddr_reg_req, .ddr_reg_we, .ddr_reg_addr, .ddr_reg_wdata,
-        .ddr_reg_ready, .ddr_reg_rdata
+        .ddr_reg_en, .ddr_reg_we, .ddr_reg_off, .ddr_reg_wdata,
+        .ddr_reg_rdata, .ddr_reg_stall
     );
 
     uart #(.CLK_HZ(CLK_HZ), .BAUD(BAUD), .RX_DEPTH(16)) u_uart (

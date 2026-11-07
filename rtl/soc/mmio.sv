@@ -3,9 +3,10 @@
 // Bus. req is held until ready; the access takes effect once, in the cycle
 // where req && ready, and read data is valid in rdata the following cycle.
 // Every register here accepts at once. DDR_STATUS .. WIN_ORIGIN (0x2C..0x3C)
-// belong to the chunk engine and are forwarded unchanged on the ddr_reg_*
-// port with the same handshake, so a CHUNK_CMD write with the queue full
-// stalls the core by holding ddr_reg_ready low. Offsets are decoded from
+// belong to the chunk engine (P2b, rtl/ddr/chunk_engine.sv) and go out on the
+// ddr_reg_* port: ddr_reg_en marks an access, ddr_reg_rdata is combinational
+// and ddr_reg_stall (CHUNK_CMD write with the queue full) holds the core, with
+// the access held stable, until the engine takes it. Offsets are decoded from
 // addr[7:2]; offsets with no register read 0 and ignore writes.
 //
 // ERR and ERR_PC are not cleared by rst. The error halt lasts until reset
@@ -51,20 +52,19 @@ module mmio
     // Board LEDs
     output logic [7:0]  leds,
 
-    // Chunk engine registers 0x2C..0x3C
-    output logic        ddr_reg_req,
+    // Chunk engine registers 0x2C..0x3C (P2b port names)
+    output logic        ddr_reg_en,
     output logic        ddr_reg_we,
-    output logic [5:0]  ddr_reg_addr,
+    output logic [5:0]  ddr_reg_off,
     output logic [31:0] ddr_reg_wdata,
-    input  logic        ddr_reg_ready,
-    input  logic [31:0] ddr_reg_rdata
+    input  logic [31:0] ddr_reg_rdata,
+    input  logic        ddr_reg_stall
 );
 
     logic [7:0]  off;
     logic        is_ddr;
     logic        acc;       // local register access accepted this cycle
-    logic        rd_ddr_q;  // last accepted access went to the chunk engine
-    logic [31:0] rdata_q;   // registered read data for local registers
+    logic [31:0] rdata_q;   // registered read data
 
     logic [31:0]          cycles;
     logic [ERR_WIDTH-1:0] err    = '0;
@@ -75,13 +75,13 @@ module mmio
     assign is_ddr = (off >= MMIO_DDR_STATUS) && (off <= MMIO_WIN_ORIGIN);
     assign acc    = req && !is_ddr;
 
-    assign ddr_reg_req   = req && is_ddr;
+    assign ddr_reg_en    = req && is_ddr;
     assign ddr_reg_we    = we;
-    assign ddr_reg_addr  = off[5:0];
+    assign ddr_reg_off   = off[5:0];
     assign ddr_reg_wdata = wdata;
 
-    assign ready = is_ddr ? ddr_reg_ready : req;
-    assign rdata = rd_ddr_q ? ddr_reg_rdata : rdata_q;
+    assign ready = req && !(is_ddr && ddr_reg_stall);
+    assign rdata = rdata_q;
 
     // Write side effects
     assign swap_req      = acc && we && (off == MMIO_FB_SWAP) && wdata[0];
@@ -113,12 +113,12 @@ module mmio
     // Read data, registered so it is valid the cycle after the access
     always_ff @(posedge clk) begin
         if (rst) begin
-            rd_ddr_q <= 1'b0;
-            rdata_q  <= '0;
+            rdata_q <= '0;
         end else if (req && ready) begin
-            rd_ddr_q <= is_ddr;
-            rdata_q  <= '0;
-            if (!we) begin
+            rdata_q <= '0;
+            if (is_ddr) begin
+                if (!we) rdata_q <= ddr_reg_rdata;
+            end else if (!we) begin
                 unique case (off)
                     MMIO_FB_SWAP:     rdata_q <= {31'b0, swap_pending};
                     MMIO_FRAME_COUNT: rdata_q <= frame_count;

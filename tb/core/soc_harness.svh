@@ -1,8 +1,11 @@
 // Shared harness for the tb/core program tests, `included inside a testbench
 // module that declares string parameters IMEM_HEX and DMEM_HEX (set with -G
-// by tb/core/tb.mk). Provides a 50 MHz clock, kc_soc with the display, DDR
-// and world ports tied off, a 1 Mbaud UART receiver on uart_tx and sender on
-// uart_rx, a retirement trace (+trace), and memory and register peek helpers.
+// by tb/core/tb.mk). Provides a 50 MHz clock, kc_soc, behavioral models of
+// the display core-side port (framebuffer bytes, palette, swap) and of the
+// chunk-engine register port (with a programmable CHUNK_CMD stall), a 1 Mbaud
+// UART receiver on uart_tx and sender on uart_rx, a retirement trace
+// (+trace), and memory and register peek helpers. The world port is unused
+// (EXT_WORLD = 0, internal stub).
 
 localparam int CLK_NS   = 20;    // 50 MHz core clock
 localparam int BIT_CLKS = 50;    // 1 Mbaud: 50 clocks per bit
@@ -14,6 +17,22 @@ logic        uart_rx = 1'b1;
 logic [7:0]  leds;
 logic        err_led;
 
+// Display port
+logic        fb_we, fb_re, pal_we, swap_req, fb_mode;
+logic [16:0] fb_addr;
+logic [7:0]  fb_wdata, fb_rdata = 8'h00;
+logic [7:0]  pal_addr;
+logic [11:0] pal_wdata;
+logic        swap_pending = 1'b0;
+logic        vblank       = 1'b0;
+logic [31:0] frame_count  = 32'h0;
+
+// Chunk-engine register port
+logic        ddr_reg_en, ddr_reg_we;
+logic [5:0]  ddr_reg_off;
+logic [31:0] ddr_reg_wdata, ddr_reg_rdata;
+logic        ddr_reg_stall;
+
 always #(CLK_NS / 2) clk = ~clk;
 
 /* verilator lint_off PINCONNECTEMPTY */
@@ -24,11 +43,10 @@ kc_soc #(
     .clk, .rst,
     .uart_tx, .uart_rx,
     .leds, .err_led,
-    .fb_we(), .fb_re(), .fb_addr(), .fb_wdata(), .fb_rdata(8'h00),
-    .pal_we(), .pal_addr(), .pal_wdata(),
-    .swap_req(), .swap_pending(1'b0), .vblank(1'b0), .frame_count(32'h0), .fb_mode(),
-    .ddr_reg_req(), .ddr_reg_we(), .ddr_reg_addr(), .ddr_reg_wdata(),
-    .ddr_reg_ready(1'b1), .ddr_reg_rdata(32'h0),
+    .fb_we, .fb_re, .fb_addr, .fb_wdata, .fb_rdata,
+    .pal_we, .pal_addr, .pal_wdata,
+    .swap_req, .swap_pending, .vblank, .frame_count, .fb_mode,
+    .ddr_reg_en, .ddr_reg_we, .ddr_reg_off, .ddr_reg_wdata, .ddr_reg_rdata, .ddr_reg_stall,
     .world_req(), .world_we(), .world_addr(), .world_wdata(),
     .world_ready(1'b0), .world_rdata(8'h00)
 );
@@ -36,6 +54,52 @@ kc_soc #(
 
 int unsigned cycle = 0;
 always @(posedge clk) cycle <= cycle + 1;
+
+// ---------------------------------------------------------------------
+// Display model: back framebuffer (1-cycle read latency, writes >= 76800
+// dropped), palette, and swap_req counting. Tests drive swap_pending,
+// vblank and frame_count themselves.
+// ---------------------------------------------------------------------
+logic [7:0]  fb_mem [76800];
+logic [11:0] pal_mem [256];
+int          swap_req_count = 0;
+
+always @(posedge clk) begin
+    if (fb_we && fb_addr < 17'd76800) fb_mem[fb_addr] <= fb_wdata;
+    if (fb_re) fb_rdata <= (fb_addr < 17'd76800) ? fb_mem[fb_addr] : 8'h00;
+    if (pal_we) pal_mem[pal_addr] <= pal_wdata;
+    if (swap_req) swap_req_count <= swap_req_count + 1;
+end
+
+// ---------------------------------------------------------------------
+// Chunk-engine register model: five registers at 0x2C..0x3C, combinational
+// read; a CHUNK_CMD write stalls for ddr_cmd_stall cycles before it is taken.
+// ---------------------------------------------------------------------
+logic [31:0] ddr_regs [5];
+int          ddr_cmd_stall  = 0;
+int          ddr_stall_left = 0;
+int          ddr_stalled_cycles = 0;
+logic        ddr_in_cmd = 1'b0;
+
+initial for (int i = 0; i < 5; i++) ddr_regs[i] = 32'h0;
+
+assign ddr_reg_rdata = ddr_regs[(ddr_reg_off - 6'h2C) >> 2];
+assign ddr_reg_stall = ddr_reg_en && ddr_reg_we && ddr_reg_off == 6'h30 &&
+                       (!ddr_in_cmd || ddr_stall_left != 0);
+
+always @(posedge clk) begin
+    if (ddr_reg_en && ddr_reg_we && ddr_reg_off == 6'h30 && !ddr_in_cmd) begin
+        ddr_in_cmd     <= 1'b1;
+        ddr_stall_left <= ddr_cmd_stall;
+    end else if (ddr_in_cmd && ddr_stall_left != 0) begin
+        ddr_stall_left <= ddr_stall_left - 1;
+    end
+    if (ddr_reg_stall) ddr_stalled_cycles <= ddr_stalled_cycles + 1;
+    if (ddr_reg_en && ddr_reg_we && !ddr_reg_stall) begin
+        ddr_regs[(ddr_reg_off - 6'h2C) >> 2] <= ddr_reg_wdata;
+        ddr_in_cmd <= 1'b0;
+    end
+end
 
 // ---------------------------------------------------------------------
 // Peek / poke
@@ -69,21 +133,19 @@ task automatic run_until_done(input int max_cycles);
 endtask
 
 // ---------------------------------------------------------------------
-// Retirement trace: +trace prints one line per retired instruction.
+// Retirement trace from the core's retire_* wires: +trace prints one line
+// per retired instruction (with the rd write, if any) and one per halt.
 // ---------------------------------------------------------------------
-bit          trace_on = 1'b0;
-logic [31:0] tr_inst;
+bit trace_on = 1'b0;
 initial trace_on = $test$plusargs("trace");
 
 always @(posedge clk) begin
     if (trace_on && !rst) begin
-        if (dut.u_core.state == dut.u_core.S_ID) tr_inst <= dut.u_core.imem_rdata;
-        if (dut.u_core.rf_we)
-            $display("trace pc=%08h inst=%08h x%0d=%08h", dut.u_core.pc, tr_inst,
-                     dut.u_core.ex_rd, dut.u_core.rf_wdata);
-        else if ((dut.u_core.state == dut.u_core.S_WB) ||
-                 (dut.u_core.state == dut.u_core.S_MEM && dut.u_core.bus_ready && dut.u_core.ex_is_store))
-            $display("trace pc=%08h inst=%08h", dut.u_core.pc, tr_inst);
+        if (dut.u_core.retire_valid && dut.u_core.retire_rd_we)
+            $display("trace pc=%08h inst=%08h x%0d=%08h", dut.u_core.retire_pc,
+                     dut.u_core.retire_inst, dut.u_core.retire_rd_addr, dut.u_core.retire_rd_wdata);
+        else if (dut.u_core.retire_valid)
+            $display("trace pc=%08h inst=%08h", dut.u_core.retire_pc, dut.u_core.retire_inst);
         if (dut.u_core.err_set != 0)
             $display("trace pc=%08h halt err=%b", dut.u_core.err_pc, dut.u_core.err_set);
     end

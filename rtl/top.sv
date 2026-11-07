@@ -43,8 +43,8 @@ module top (
         .fb_we(), .fb_re(), .fb_addr(), .fb_wdata(), .fb_rdata(8'h00),
         .pal_we(), .pal_addr(), .pal_wdata(),
         .swap_req(), .swap_pending(1'b0), .vblank(1'b0), .frame_count(32'h0), .fb_mode(),
-        .ddr_reg_req(), .ddr_reg_we(), .ddr_reg_addr(), .ddr_reg_wdata(),
-        .ddr_reg_ready(1'b1), .ddr_reg_rdata(32'h0),
+        .ddr_reg_en(), .ddr_reg_we(), .ddr_reg_off(), .ddr_reg_wdata(),
+        .ddr_reg_rdata(32'h0), .ddr_reg_stall(1'b0),
         .world_req(), .world_we(), .world_addr(), .world_wdata(),
         .world_ready(1'b0), .world_rdata(8'h00)
     );

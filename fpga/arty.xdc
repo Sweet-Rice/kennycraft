@@ -20,8 +20,9 @@ set_property -dict { PACKAGE_PIN H5  IOSTANDARD LVCMOS33 } [get_ports led];     
 ## J2 (G0-G3, HS, VS) on JB. Pmod VGA pin roles from Digilent's official
 ## Arty A7-100 Pmod VGA demo (fpga/ref/Arty-A7-100-Pmod-VGA.xdc, which uses
 ## JB + JC); JA/JB package pins from fpga/ref/Arty-A7-100-Master.xdc.
-## TODO(P1): header pair JA (J1) + JB (J2) per the board owner; on-board
-## capture check pending.
+## Header pair confirmed on the board 2026-11-07: JA (J1) + JB (J2).
+## KC_TARGET=display_test showed the expected colour bars and grey ramp
+## through the VGA-to-HDMI capture chain (TODO(P1) closed).
 set_property -dict { PACKAGE_PIN G13 IOSTANDARD LVCMOS33 } [get_ports {vga_r[0]}]; #IO_0_15 Sch=ja[1]
 set_property -dict { PACKAGE_PIN B11 IOSTANDARD LVCMOS33 } [get_ports {vga_r[1]}]; #IO_L4P_T0_15 Sch=ja[2]
 set_property -dict { PACKAGE_PIN A11 IOSTANDARD LVCMOS33 } [get_ports {vga_r[2]}]; #IO_L4N_T0_15 Sch=ja[3]

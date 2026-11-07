@@ -149,7 +149,11 @@ module ddr_bridge (
 
   assign app_addr     = {1'b0, u_chunk, u_beat, 3'b000};
   assign app_cmd      = (ust == U_WRITE) ? CMD_WRITE : CMD_READ;
-  assign app_en       = (ust == U_READ) | ((ust == U_WRITE) & wf_have & ~w_cmd_done);
+  // A write command goes out only with or after its data (UG586 allows data
+  // to trail the command by at most two cycles, which a stalled
+  // app_wdf_rdy could exceed).
+  assign app_en       = (ust == U_READ)
+                      | ((ust == U_WRITE) & wf_have & ~w_cmd_done & (w_dat_done | app_wdf_rdy));
   assign app_wdf_wren = (ust == U_WRITE) & wf_have & ~w_dat_done;
   assign app_wdf_end  = app_wdf_wren;
   assign app_wdf_data = wf_dout;

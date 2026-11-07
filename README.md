@@ -42,3 +42,31 @@ The arena is linked into every chip program with `KC_CHIP`; game logic must use 
 `make arena-host` compiles the same arena without `KC_CHIP` using host C11.
 `arena_reset()` preserves the boot-time high-water mark. Requests round up to 4 bytes;
 overflow aborts on the host and lights LEDs 1010 then halts on the chip.
+
+## Verilator harness
+
+Install Verilator, SDL3 and pkg-config (`brew install verilator sdl3 pkg-config`).
+`make vl-fixture` builds `out/vl/kcvl` and opens a 640×480 SDL3 window.
+For a finite headless run:
+
+```sh
+make vl-fixture RUN_ARGS="--headless --frames 5 --keys tb/harness/fixture/keys.txt"
+```
+
+Every swap writes `out/frames/frame_00001.png`, etc.; subsequent runs remove only
+`frame_*.png` in the selected `--png-dir`. PNGs use native 320×240 or 160×120 sizes.
+The window uses nearest-neighbor scaling. W/A/S/D, arrows, Space, J/K and 1–9
+produce the wiki down/up bytes; Escape/window close exits. Live input is held
+until a frame boundary. `--record FILE` records those boundaries; `--keys FILE`
+replays `<frame> 0x<byte>` entries (`#` comments supported; frame 0 is after reset).
+
+Run control: `--frames N`, `--max-cycles N`, `--expect-pass`, and
+`--expect-err NAME[@PC]`. Exit codes: 0 success/quit, 1 failed expectation,
+2 timeout, 3 unexpected hardware ERR, 4 jump-to-self halt, 5 setup/usage.
+`--trace FILE` needs retire probes; `--expect-err` needs ERR probes. The no-CPU
+fixture deliberately provides neither. `--vcd FILE --vcd-window START:END`
+captures an inclusive core-cycle range, excluding the 20 reset cycles.
+
+`--palette-hex FILE` loads RGB444 readmemh entries before observed palette writes.
+All RTL names are isolated in ports/probes headers and Verilator configuration.
+Production binding awaits the published RTL top and its confirmed hierarchy.

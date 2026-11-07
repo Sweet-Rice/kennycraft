@@ -6,4 +6,5 @@ build/out/
 vivado*.log
 vivado*.str
 clockInfo.txt
+/out/
 __pycache__/

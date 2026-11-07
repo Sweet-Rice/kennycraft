@@ -24,3 +24,17 @@ vivado -mode batch -source fpga/build.tcl      # KC_TARGET=<name> picks fpga/<na
 ## Credits
 
 The Stage 0 CPU core is inspired by Tai's [RISC-V-Core-progression](https://github.com/Sweet-Rice/RISC-V-Core-progression) multicycle RV32I core (D11).
+
+## Software
+
+Put xPack `riscv-none-elf-gcc` 12+ on `PATH` (fallback: `riscv64-unknown-elf-gcc`).
+Run `make sw` or `make sw PROG="sw/game.c sw/kernel.c"` from the repository root.
+Outputs are under ignored `out/`: ELF, map, disassembly, and two 8192-word hex images.
+The build probes `rv32i_zmmul`, falling back to `rv32im`. Avoid division/remainder in chip code.
+The data image includes the 0x100-byte reserved shared-state prefix.
+
+`sw/gpu.h`, `sw/kc.ld`, `sw/crt0.S`, and `sw/arena.{h,c}` are verbatim Bennett wiki sources.
+The default integer-only bring-up program displays a gradient and W/A/S/D-controlled square.
+UART_STATUS bit 1 means TX **busy**, so transmission waits for it to clear.
+
+The arena is linked into every chip program with `KC_CHIP`; game logic must use it only with mask 1.

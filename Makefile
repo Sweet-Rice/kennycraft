@@ -13,9 +13,11 @@ OBJ       := obj_dir
 TB_TARGETS :=
 include $(wildcard tb/*/tb.mk)
 
+include mk/bench.mk
+
 .PHONY: check clean $(TB_TARGETS)
 
-check: $(TB_TARGETS)
+check: $(TB_TARGETS) check-bench
 	@echo "make check: $(words $(TB_TARGETS)) target(s) passed"
 
 clean:

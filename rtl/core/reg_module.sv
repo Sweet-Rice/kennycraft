@@ -16,7 +16,9 @@ module reg_module #(
     output logic [W-1:0]         d_out2
 );
 
-    logic [W-1:0] regs [D];
+    // Without the attribute Vivado folds the core's ID->EX operand registers
+    // into a BRAM read, whose clock-to-out lands on the branch/ALU path.
+    (* ram_style = "distributed" *) logic [W-1:0] regs [D];
 
     always_ff @(posedge clk) begin
         if (we) regs[wr] <= d_in;

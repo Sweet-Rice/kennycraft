@@ -9,4 +9,5 @@ read_verilog -sv {
 }
 source rtl/ddr/mig/mig_ddr3.tcl
 read_xdc fpga/ddr_test/ddr_test.xdc
+read_xdc rtl/ddr/ddr_bridge.xdc
 set top ddr_test_top

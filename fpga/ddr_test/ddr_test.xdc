@@ -17,14 +17,5 @@ set_false_path -from [get_ports ck_rst]
 set_false_path -to [get_ports {led[*]}]
 set_false_path -to [get_ports uart_rxd_out]
 
-## The 50 MHz core clock and the MIG ui_clk only meet in ddr_bridge's XPM
-## FIFOs and synchronizer. Both derive from the 100 MHz input, so without this
-## Vivado times them as synchronous (4 ns requirement). The XPM gray-pointer
-## set_bus_skew constraints still apply. Same lines as the DDR3 block of
-## fpga/arty.xdc.
-set_clock_groups -asynchronous \
-  -group [get_clocks -of_objects [get_pins -hierarchical -filter {NAME =~ *u_bridge/clk}]] \
-  -group [get_clocks -of_objects [get_pins -hierarchical -filter {NAME =~ *u_bridge/ui_clk}]]
-
 set_property CFGBVS VCCO        [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]

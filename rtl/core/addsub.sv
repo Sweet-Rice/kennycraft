@@ -1,41 +1,23 @@
-`timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 12.08.2026 22:21:40
-// Design Name: 
-// Module Name: addsub
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
-
-module addsub #(parameter W = 32) (
-    input  logic [W-1:0] a, b,
-    input  logic sub,       
+// Adder/subtractor with signed and unsigned less-than flags.
+module addsub #(
+    parameter int W = 32
+) (
+    input  logic [W-1:0] a,
+    input  logic [W-1:0] b,
+    input  logic         sub,
     output logic [W-1:0] sum,
-    output logic lt,       
-    output logic ltu       
+    output logic         lt,
+    output logic         ltu
 );
 
     logic [W-1:0] b_in;
-    logic cout, v;
+    logic         cout, v;
 
-    assign b_in = b ^ {W{sub}};
-    assign {cout, sum} = a + b_in + sub;
+    assign b_in        = b ^ {W{sub}};
+    assign {cout, sum} = {1'b0, a} + {1'b0, b_in} + {{W{1'b0}}, sub};
 
     assign ltu = ~cout;
-    assign v   = (a[W-1] ^ sum[W-1]) & ~(a[W-1] ^ b[W-1] ^ sub); //HATE.
+    assign v   = (a[W-1] ^ sum[W-1]) & ~(a[W-1] ^ b[W-1] ^ sub);
     assign lt  = sum[W-1] ^ v;
-
 
 endmodule

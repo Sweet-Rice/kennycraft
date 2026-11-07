@@ -5,4 +5,5 @@ build/out/
 *.jou
 vivado*.log
 vivado*.str
+clockInfo.txt
 __pycache__/

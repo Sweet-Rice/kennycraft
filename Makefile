@@ -6,7 +6,7 @@
 # targets (Bennett wiki page, Make targets) land here as they come up.
 
 VERILATOR ?= verilator
-VL_TB     ?= --binary --timing -j 0 -Wno-fatal
+VL_TB     ?= --binary --timing --build-jobs 0 --verilate-jobs 1 -Wno-fatal
 VL_LINT   ?= --lint-only -Wall
 OBJ       := obj_dir
 

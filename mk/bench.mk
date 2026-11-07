@@ -1,4 +1,3 @@
-.DEFAULT_GOAL := sw
 CROSS ?= riscv-none-elf-
 ifeq ($(shell command -v $(CROSS)gcc 2>/dev/null),)
 CROSS := riscv64-unknown-elf-
@@ -65,3 +64,6 @@ vl-fixture: vl-fixture-build
 .PHONY: check-fixture
 check-fixture: vl-fixture-build
 	$(PYTHON) scripts/check_fixture.py
+
+.PHONY: check-bench
+check-bench: check-fixture

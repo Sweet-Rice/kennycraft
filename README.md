@@ -69,7 +69,11 @@ captures an inclusive core-cycle range, excluding the 20 reset cycles.
 
 `--palette-hex FILE` loads RGB444 readmemh entries before observed palette writes.
 All RTL names are isolated in ports/probes headers and Verilator configuration.
-Production binding awaits the published RTL top and its confirmed hierarchy.
+Production binding to `kc_soc`, `display`, and the DDR modules remains pending.
+`make check` preserves the registered upstream checks and adds `check-bench`,
+which currently runs the standalone fixture (not the pending chip instruction suite).
+Bare `make` selects `check`. An available bench compiler supplies `RISCV_PREFIX`;
+otherwise the upstream compiler default is preserved. Explicit overrides still win.
 
 `make check-fixture PYTHON=<python-with-Pillow>` runs two five-frame replays,
 checks every RGB pixel (including writes on swap completion), verifies the F7/w
@@ -78,3 +82,8 @@ It needs no RTL beyond the fixture. Frame outputs are isolated in `out/fixture-c
 
 For Python tools, use an isolated Python 3.13 environment with
 `pip install pillow pyserial pygame`; pygame 2.6.1 does not build against Python 3.15.
+
+With Verilator 5.054, upstream `lint-core` and the `clk_gen` portion of
+`lint-display` currently fail on `PROCASSINIT` (declaration initializers also
+written procedurally). The runtime core/display tests and fixture run separately;
+a passing fixture does not imply the complete `make check` is green.

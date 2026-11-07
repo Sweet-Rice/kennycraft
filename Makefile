@@ -5,16 +5,20 @@
 # so areas never edit each other's rules. Bennett's sim, vl, board and keys
 # targets (Bennett wiki page, Make targets) land here as they come up.
 
+.DEFAULT_GOAL := check
+
 VERILATOR ?= verilator
 VL_TB     ?= --binary --timing --build-jobs 0 --verilate-jobs 1 -Wno-fatal
 VL_LINT   ?= --lint-only -Wall
 OBJ       := obj_dir
 
-TB_TARGETS :=
-RISCV_PREFIX ?= $(CROSS)
-include $(wildcard tb/*/tb.mk)
-
 include mk/bench.mk
+
+TB_TARGETS :=
+ifneq ($(shell command -v $(CC) 2>/dev/null),)
+RISCV_PREFIX ?= $(CROSS)
+endif
+include $(wildcard tb/*/tb.mk)
 
 .PHONY: check clean $(TB_TARGETS)
 

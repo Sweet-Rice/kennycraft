@@ -18,7 +18,7 @@ module t_chunk_roundtrip;
     int cx_list [5] = '{0, 5, 255, 128, 77};
     int cz_list [5] = '{0, 7, 255, 3, 200};
     logic [31:0] st, d;
-    int unsigned t, t0, load_cycles;
+    int unsigned t, t0, load_cycles, store_cycles;
     int s, max_stall;
     logic [3:0] img [8192];
 
@@ -47,7 +47,15 @@ module t_chunk_roundtrip;
       wmem[0][pa] = img[i];
       for (int c = 1; c < 4; c++) wmem[c][pa] = ~img[i];  // STORE must read copy 0
     end
-    chunk_sync(1, 5, 7);
+    chunk_cmd(1, 5, 7, t, s);
+    t0 = cyc;
+    chunk_wait(t);
+    store_cycles = cyc - t0;
+    $display("t_chunk_roundtrip: one STORE = %0d core cycles = %0d.%02d us at 50 MHz",
+             store_cycles, store_cycles / 50, (store_cycles % 50) * 2);
+    // A STORE is done once the slot has been read out; its last beats reach
+    // DDR3 through the bridge shortly after (before any later command).
+    repeat (100) @(posedge clk);
     for (int i = 0; i < 8192; i++)
       if (ddr_block(5, 7, i) !== img[i])
         $fatal(1, "STORE: block %0d in DDR3 = %h, slot had %h", i, ddr_block(5, 7, i), img[i]);

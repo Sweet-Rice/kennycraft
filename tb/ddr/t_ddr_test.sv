@@ -47,7 +47,7 @@ module t_ddr_test;
         e = p + name.len();
         while (e < s.len() && s[e] != " ") e++;
         h = s.substr(p + name.len(), e - 1);
-        v = h.atohex();
+        v = 64'(unsigned'(h.atohex()));
         return 1;
       end
     return 0;

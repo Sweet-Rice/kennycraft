@@ -11,6 +11,10 @@
 //   0x3C WIN_ORIGIN  R/W  bits 5:0 x, 13:8 z (window corner mod 64)
 // A write happens on the edge where reg_en & reg_we & !reg_stall. reg_rdata is
 // combinational and reads have no side effects.
+// Commands run one at a time, in order. CHUNK_DONE counts a LOAD once all
+// 8,192 blocks are in the world, and a STORE once the whole slot has been read
+// out (the slot may then be reused); the STORE's last beats reach DDR3 through
+// ddr_bridge right after, ahead of any later command's DDR3 access.
 //
 // DDR3 chunk format (only this engine reads or writes it): chunk (cx, cz) is
 // 4096 bytes at (cz * 256 + cx) * 4096. Block i = (y * 16 + z) * 16 + x

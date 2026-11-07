@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""gen_assets.py — KennyCraft textures, output palette and math tables.
+
+Writes into gen/:
+  textures.hex     12,288 lines, one byte per texel   ($readmemh, texture BRAM at 0x3000_0000)
+                   index = ((type*3 + face) << 8) | (v << 4) | u ; face 0 top, 1 side, 2 bottom
+  palette.hex      256 lines, RGB444 (bits 11:8 R, 7:4 G, 3:0 B)  (palette at 0x6000_0000)
+  kc_tables.h      1/x and sine tables (C, .rodata in data memory)
+  kc_assets.h      textures + palette as C arrays (laptop build only)
+  atlas.png        preview of every texture, shades and fog levels
+
+Pixel byte: 7:4 color index, 3:2 face shade, 1:0 fog level. Color 15 is sky: its 16 bytes are
+a top-to-bottom gradient instead of shades. Deterministic: same seed, same files.
+"""
+import math, os, random, sys
+
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "gen")
+os.makedirs(OUT, exist_ok=True)
+
+# ---------------------------------------------------------------- 16 base colors ----------
+BASE = [
+    (24, 22, 28),     # 0  near-black: outlines, holes, UI
+    (110, 172, 66),   # 1  grass light
+    (74, 128, 46),    # 2  grass dark
+    (138, 100, 70),   # 3  dirt light
+    (102, 72, 50),    # 4  dirt dark
+    (140, 140, 142),  # 5  stone light
+    (102, 102, 108),  # 6  stone dark
+    (92, 70, 42),     # 7  bark / plank seam
+    (182, 146, 92),   # 8  planks
+    (222, 210, 152),  # 9  sand
+    (50, 98, 38),     # 10 leaves dark
+    (156, 64, 50),    # 11 brick
+    (192, 188, 180),  # 12 mortar / highlight
+    (204, 174, 104),  # 13 log rings, light wood
+    (245, 245, 245),  # 14 white UI
+    None,             # 15 sky (gradient)
+]
+SKY_TOP, SKY_HORIZON = (72, 122, 204), (172, 206, 240)
+FOG = SKY_HORIZON
+SHADE = [1.00, 0.82, 0.68, 0.52]   # top, x sides, z sides, bottom
+FOG_MIX = [0.0, 0.35, 0.65, 0.90]
+
+def lerp(a, b, t): return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+def to444(c):
+    return tuple(max(0, min(15, int(round(v / 255 * 15)))) for v in c)
+
+palette_rgb = []
+for byte in range(256):
+    ci, shade, fog = byte >> 4, (byte >> 2) & 3, byte & 3
+    if ci == 15:
+        c = lerp(SKY_TOP, SKY_HORIZON, (byte & 15) / 15)
+    else:
+        c = tuple(v * SHADE[shade] for v in BASE[ci])
+        c = lerp(c, FOG, FOG_MIX[fog])
+    palette_rgb.append(to444(c))
+
+# ---------------------------------------------------------------- textures ----------------
+T = 16
+NTYPES, NFACES = 16, 3
+tex = [[[[0] * T for _ in range(T)] for _ in range(NFACES)] for _ in range(NTYPES)]
+rng = random.Random(0x4B43)
+
+def noise_fill(img, colors, weights):
+    for v in range(T):
+        for u in range(T):
+            img[v][u] = rng.choices(colors, weights)[0]
+
+def new(): return [[0] * T for _ in range(T)]
+
+def grass_top():
+    img = new(); noise_fill(img, [1, 2], [3, 1]); return img
+def dirt():
+    img = new(); noise_fill(img, [3, 4], [3, 1]); return img
+def grass_side():
+    img = dirt()
+    for u in range(T):
+        depth = 3 + rng.choice([0, 0, 1, 1, 2])
+        for v in range(depth):
+            img[v][u] = rng.choices([1, 2], [3, 1])[0]
+    return img
+def stone():
+    img = new(); noise_fill(img, [5, 6], [4, 1])
+    for _ in range(5):                                # a few darker streaks
+        u, v = rng.randrange(T), rng.randrange(T)
+        for k in range(rng.randrange(2, 5)):
+            img[v][(u + k) % T] = 6
+    return img
+def cobble():
+    img = new()
+    rows = [0, 5, 10]
+    for v in range(T):
+        band = max(i for i, r in enumerate(rows) if v >= r)
+        off = [0, 6, 3][band]
+        for u in range(T):
+            edge = v in rows or (u + off) % 8 == 0 or (u + off * 2 + 5) % 13 == 0 and band == 1
+            img[v][u] = 0 if edge and rng.random() < 0.6 else (6 if edge else rng.choices([5, 12, 6], [6, 1, 1])[0])
+    return img
+def log_side():
+    img = new()
+    for u in range(T):
+        col = 7 if u % 4 in (0, 1) else 4
+        for v in range(T):
+            img[v][u] = col if rng.random() < 0.85 else (4 if col == 7 else 7)
+    return img
+def log_top():
+    img = new()
+    for v in range(T):
+        for u in range(T):
+            d = max(abs(u - 7.5), abs(v - 7.5))
+            img[v][u] = 7 if d > 6.5 else (13 if int(d) % 3 else 8)
+    return img
+def leaves():
+    img = new(); noise_fill(img, [10, 2, 0], [5, 3, 1]); return img
+def planks():
+    img = new()
+    for v in range(T):
+        for u in range(T):
+            seam = v % 4 == 3 or (u + (v // 4) * 7) % 16 == 0
+            img[v][u] = 7 if seam else rng.choices([8, 13], [5, 1])[0]
+    return img
+def sand():
+    img = new(); noise_fill(img, [9, 12, 8], [8, 2, 1]); return img
+def brick():
+    img = new()
+    for v in range(T):
+        for u in range(T):
+            mortar = v % 4 == 3 or (u + (4 if (v // 4) % 2 else 0)) % 8 == 7
+            img[v][u] = 12 if mortar else rng.choices([11, 4], [6, 1])[0]
+    return img
+def bedrock():
+    img = new(); noise_fill(img, [0, 6, 5], [3, 3, 1]); return img
+def missing():
+    img = new()
+    for v in range(T):
+        for u in range(T):
+            img[v][u] = 14 if ((u >> 2) ^ (v >> 2)) & 1 else 0
+    return img
+
+def same(f): img = f(); return (img, img, img)
+
+FACES = {
+    0: (new(), new(), new()),                 # air
+    1: (grass_top(), grass_side(), dirt()),   # grass
+    2: same(dirt),
+    3: same(stone),
+    4: same(cobble),
+    5: (log_top(), log_side(), log_top()),
+    6: same(leaves),
+    7: same(planks),
+    8: same(sand),
+    9: same(brick),
+    10: same(bedrock),
+}
+for t in range(NTYPES):
+    faces = FACES.get(t) or same(missing)
+    for f in range(NFACES):
+        tex[t][f] = faces[f]
+
+# ---------------------------------------------------------------- editable atlas ----------
+# assets/textures.png (if present) overrides the procedural textures. Layout: 48 x 256,
+# column = face (top, side, bottom) x 16 px, row = block type x 16 px. Indexed PNG whose
+# pixel values ARE the color indices; RGB images are snapped to the nearest base color.
+ATLAS_IN = os.path.join(os.path.dirname(__file__), "..", "assets", "textures.png")
+BASE_RGB = [c if c else (255, 0, 255) for c in BASE]
+if os.path.exists(ATLAS_IN):
+    from PIL import Image
+    im = Image.open(ATLAS_IN)
+    if im.size != (NFACES * T, NTYPES * T):
+        sys.exit(f"gen_assets: {ATLAS_IN} must be {NFACES * T}x{NTYPES * T}, got {im.size[0]}x{im.size[1]}")
+    indexed = im.mode == "P"
+    if not indexed:
+        im = im.convert("RGB")
+    snapped = 0
+    for t in range(NTYPES):
+        for f in range(NFACES):
+            for v in range(T):
+                for u in range(T):
+                    p = im.getpixel((f * T + u, t * T + v))
+                    if indexed:
+                        c = p if p < 15 else 0
+                    else:
+                        c = min(range(15), key=lambda i: sum((p[k] - BASE_RGB[i][k]) ** 2 for k in range(3)))
+                        snapped += p != BASE_RGB[c]
+                    tex[t][f][v][u] = c
+    print(f"gen_assets: textures from {os.path.abspath(ATLAS_IN)}" + (f" ({snapped} pixels snapped to the palette)" if snapped else ""))
+
+flat = []
+for t in range(NTYPES):
+    for f in range(NFACES):
+        for v in range(T):
+            for u in range(T):
+                c = tex[t][f][v][u]
+                assert 0 <= c < 15, "color 15 is reserved for sky"
+                flat.append(c)
+assert len(flat) == 12288
+
+# ---------------------------------------------------------------- math tables -------------
+# 1/m for m in [1, 2): 256 entries at bucket midpoints, Q16.16. qrcp() adds one Newton step.
+rcp = [int(round(65536 / (1 + (i + 0.5) / 256))) for i in range(256)]
+# Quarter-wave sine, 257 entries for angles 0..256 of 1024 per turn, Q16.16.
+sin_t = [int(round(65536 * math.sin(i * 2 * math.pi / 1024))) for i in range(257)]
+
+# ---------------------------------------------------------------- write --------------------
+def write(name, text):
+    with open(os.path.join(OUT, name), "w") as f:
+        f.write(text)
+
+write("textures.hex", "".join(f"{c:02x}\n" for c in flat))
+write("palette.hex", "".join(f"{(r << 8) | (g << 4) | b:03x}\n" for r, g, b in palette_rgb))
+
+def c_array(ctype, name, vals, per_line=16):
+    lines = []
+    for i in range(0, len(vals), per_line):
+        lines.append("    " + ", ".join(str(v) for v in vals[i:i + per_line]) + ",")
+    return f"static const {ctype} {name}[{len(vals)}] = {{\n" + "\n".join(lines) + "\n};\n"
+
+write("kc_tables.h",
+      "// Generated by tools/gen_assets.py. Do not edit.\n#ifndef KC_TABLES_H\n#define KC_TABLES_H\n#include <stdint.h>\n"
+      + c_array("uint32_t", "kc_rcp_table", rcp) + c_array("int32_t", "kc_sin_table", sin_t) + "#endif\n")
+
+pal16 = [(r << 8) | (g << 4) | b for r, g, b in palette_rgb]
+write("kc_assets.h",
+      "// Generated by tools/gen_assets.py. Laptop build only (the chip gets these through $readmemh).\n"
+      "#ifndef KC_ASSETS_H\n#define KC_ASSETS_H\n#include <stdint.h>\n"
+      + c_array("uint8_t", "kc_textures", flat, 32) + c_array("uint16_t", "kc_palette", pal16) + "#endif\n")
+
+# Editable atlas: indexed PNG, 48 x 256, palette = the 15 base colors (+ magenta for 15).
+try:
+    from PIL import Image
+    at = Image.new("P", (NFACES * T, NTYPES * T), 0)
+    pal_flat = []
+    for c in BASE_RGB: pal_flat += list(c)
+    at.putpalette(pal_flat + [0] * (768 - len(pal_flat)))
+    for t in range(NTYPES):
+        for f in range(NFACES):
+            for v in range(T):
+                for u in range(T):
+                    at.putpixel((f * T + u, t * T + v), tex[t][f][v][u])
+    at.save(os.path.join(OUT, "textures_atlas.png"))
+    at.resize((NFACES * T * 8, NTYPES * T * 8), Image.NEAREST).save(os.path.join(OUT, "textures_atlas_x8.png"))
+    pal_img = Image.new("P", (15 * 16, 16), 0)        # swatches 0..14 to pick colors from
+    pal_img.putpalette(pal_flat + [0] * (768 - len(pal_flat)))
+    for i in range(15):
+        for y in range(16):
+            for x in range(16): pal_img.putpixel((i * 16 + x, y), i)
+    pal_img.save(os.path.join(OUT, "texture_palette.png"))
+except ImportError:
+    pass
+
+# Atlas preview: rows = block types, columns = faces x shade, plus a fog strip and the palette.
+try:
+    from PIL import Image
+    S = 4
+    img = Image.new("RGB", (NFACES * 4 * (T + 2) * S, (NTYPES + 2) * (T + 2) * S), (40, 40, 40))
+    px = img.load()
+    def rgb(byte):
+        r, g, b = palette_rgb[byte]
+        return (r * 17, g * 17, b * 17)
+    for t in range(NTYPES):
+        for f in range(NFACES):
+            for sh in range(4):
+                ox, oy = ((f * 4 + sh) * (T + 2)) * S, (t * (T + 2)) * S
+                for v in range(T):
+                    for u in range(T):
+                        col = rgb((tex[t][f][v][u] << 4) | (sh << 2))
+                        for dy in range(S):
+                            for dx in range(S):
+                                px[ox + u * S + dx, oy + v * S + dy] = col
+    oy = NTYPES * (T + 2) * S                         # palette: 64 columns x 4 rows of 13x16 cells
+    for b in range(256):
+        cx, cy = (b % 64) * 13, oy + (b // 64) * 16
+        for dy in range(15):
+            for dx in range(12):
+                px[cx + dx, cy + dy] = rgb(b)
+    img.save(os.path.join(OUT, "atlas.png"))
+except ImportError:
+    pass
+
+print(f"gen_assets: wrote textures.hex palette.hex kc_tables.h kc_assets.h to {os.path.abspath(OUT)}")

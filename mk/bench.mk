@@ -61,3 +61,7 @@ vl-fixture-build: | out
 
 vl-fixture: vl-fixture-build
 	out/vl/kcvl $(RUN_ARGS)
+
+.PHONY: check-fixture
+check-fixture: vl-fixture-build
+	$(PYTHON) scripts/check_fixture.py

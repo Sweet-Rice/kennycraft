@@ -216,16 +216,17 @@ Display::~Display() {
 }
 
 bool Display::sample(const DisplaySignals& signals, uint64_t cycle) {
+    if (previous_pending_ && !signals.swap_pending) {
+        front_ ^= 1;
+    }
+
+    // A cleared pending flag exposes the newly selected back buffer this cycle.
     if (signals.fb_we && signals.fb_addr < 76800) {
         buffers_[front_ ^ 1][signals.fb_addr] = signals.fb_wdata;
     }
 
     if (signals.pal_we) {
         palette_[signals.pal_addr] = static_cast<uint16_t>(signals.pal_wdata & 0x0FFF);
-    }
-
-    if (previous_pending_ && !signals.swap_pending) {
-        front_ ^= 1;
     }
 
     bool frame_emitted = false;

@@ -70,3 +70,11 @@ captures an inclusive core-cycle range, excluding the 20 reset cycles.
 `--palette-hex FILE` loads RGB444 readmemh entries before observed palette writes.
 All RTL names are isolated in ports/probes headers and Verilator configuration.
 Production binding awaits the published RTL top and its confirmed hierarchy.
+
+`make check-fixture PYTHON=<python-with-Pillow>` runs two five-frame replays,
+checks every RGB pixel (including writes on swap completion), verifies the F7/w
+loopback bytes at frames 2/3, and compares PNG bytes and UART/frame logs.
+It needs no RTL beyond the fixture. Frame outputs are isolated in `out/fixture-check`.
+
+For Python tools, use an isolated Python 3.13 environment with
+`pip install pillow pyserial pygame`; pygame 2.6.1 does not build against Python 3.15.

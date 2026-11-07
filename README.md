@@ -38,3 +38,7 @@ The default integer-only bring-up program displays a gradient and W/A/S/D-contro
 UART_STATUS bit 1 means TX **busy**, so transmission waits for it to clear.
 
 The arena is linked into every chip program with `KC_CHIP`; game logic must use it only with mask 1.
+
+`make arena-host` compiles the same arena without `KC_CHIP` using host C11.
+`arena_reset()` preserves the boot-time high-water mark. Requests round up to 4 bytes;
+overflow aborts on the host and lights LEDs 1010 then halts on the chip.

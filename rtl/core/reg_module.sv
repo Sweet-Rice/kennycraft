@@ -1,44 +1,28 @@
-`timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 14.08.2026 15:34:43
-// Design Name: 
-// Module Name: reg_module
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments: This is designed to be variable depth in preparation for 
-// physical threads. {ctx_addr, $clog2(R)} = $clog2(D) is the pattern.
+// Register file: D entries of W bits, one write port, two asynchronous read
+// ports (LUT RAM). x0 is not forced to zero here, so inference stays plain;
+// the core masks reads of x0 and never writes it. D is a parameter so later
+// stages can stack per-context register sets ({ctx, reg} addressing).
+module reg_module #(
+    parameter int W = 32,
+    parameter int D = 32
+) (
+    input  logic                 clk,
+    input  logic                 we,
+    input  logic [$clog2(D)-1:0] wr,
+    input  logic [$clog2(D)-1:0] rd1,
+    input  logic [$clog2(D)-1:0] rd2,
+    input  logic [W-1:0]         d_in,
+    output logic [W-1:0]         d_out1,
+    output logic [W-1:0]         d_out2
+);
 
-//intentionally left out x0 needing to be zero. having that inside could mess up inference
-// 
-//////////////////////////////////////////////////////////////////////////////////
+    logic [W-1:0] regs [D];
 
+    always_ff @(posedge clk) begin
+        if (we) regs[wr] <= d_in;
+    end
 
-module reg_module#(parameter W = 32, D = 64, R = 32)(
-input logic clk, we, 
-input logic [$clog2(D)-1:0] wr, rd1, rd2, //rd3,
-input logic [W-1:0] d_in, output logic [W-1:0] d_out1, d_out2//, d_out3
+    assign d_out1 = regs[rd1];
+    assign d_out2 = regs[rd2];
 
-    );
-    
-   logic [W-1:0] regs [D-1:0]; 
-   always_ff@(posedge clk) begin
-   if (we) regs[wr]<=d_in;
-   end
-   assign d_out1=regs[rd1];
-   assign d_out2=regs[rd2];
-   //assign d_out3=regs[rd3]; 
-    
-    
 endmodule
-
-

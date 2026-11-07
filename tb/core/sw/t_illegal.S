@@ -104,7 +104,7 @@ _start:
     sw     a4, 0xE0(t0)         /* ERR after reset */
     lw     a4, MMIO_ERR_PC(s0)
     sw     a4, 0xE4(t0)         /* ERR_PC after reset */
-    li     a5, 0x70000000
+    li     a5, 0x80000000       /* region 0x8: first unmapped region */
     sw     a4, 0(a5)            /* unmapped: dropped */
     lw     a4, 0(a5)
     sw     a4, 0xEC(t0)

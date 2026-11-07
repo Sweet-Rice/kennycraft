@@ -116,7 +116,7 @@ package kc_isa_pkg;
 
     // ------------------------------------------------------------------
     // Memory map (Shared page, Memory map). Region = address bits 31:28.
-    // Regions 0x7 to 0xF are unmapped: loads return 0, stores dropped.
+    // Regions 0x8 to 0xF are unmapped: loads return 0, stores dropped.
     // ------------------------------------------------------------------
     localparam logic [31:0] IMEM_BASE    = 32'h0000_0000;
     localparam int unsigned IMEM_BYTES   = 32 * 1024;
@@ -127,6 +127,8 @@ package kc_isa_pkg;
     localparam logic [31:0] FB_BASE      = 32'h4000_0000;
     localparam logic [31:0] MMIO_BASE    = 32'h5000_0000;
     localparam logic [31:0] PAL_BASE     = 32'h6000_0000;
+    localparam logic [31:0] GPU_BASE     = 32'h7000_0000;
+    localparam int unsigned GPU_BYTES    = 32'h0001_1000;  // 68 KB; offsets past it unmapped
 
     localparam logic [3:0]  REG_IMEM     = 4'h0;
     localparam logic [3:0]  REG_DMEM     = 4'h1;
@@ -135,6 +137,7 @@ package kc_isa_pkg;
     localparam logic [3:0]  REG_FB       = 4'h4;
     localparam logic [3:0]  REG_MMIO     = 4'h5;
     localparam logic [3:0]  REG_PAL      = 4'h6;
+    localparam logic [3:0]  REG_GPU      = 4'h7;
 
     // ------------------------------------------------------------------
     // MMIO offsets from MMIO_BASE

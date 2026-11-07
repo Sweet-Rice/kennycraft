@@ -22,7 +22,8 @@
 // So 128-bit beat b holds blocks 32b .. 32b + 31, block 32b + n in bits
 // [4n + 3 : 4n].
 //
-// World port: one physical address for all four world_mem copies.
+// World port: one physical address for both world_mem copies (copy n serves
+// VTRACE lanes 4n..4n+3).
 //   LOAD  writes block i of chunk (cx, cz) to {y, cz[1:0], z, cx[1:0], x}
 //         in every copy (eng_we), one block per cycle.
 //   STORE reads the same addresses from copy 0 (eng_re, data on eng_rdata one

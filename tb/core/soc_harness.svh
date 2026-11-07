@@ -83,7 +83,7 @@ logic        ddr_in_cmd = 1'b0;
 
 initial for (int i = 0; i < 5; i++) ddr_regs[i] = 32'h0;
 
-assign ddr_reg_rdata = ddr_regs[(ddr_reg_off - 6'h2C) >> 2];
+assign ddr_reg_rdata = ddr_regs[3'((ddr_reg_off - 6'h2C) >> 2)];
 assign ddr_reg_stall = ddr_reg_en && ddr_reg_we && ddr_reg_off == 6'h30 &&
                        (!ddr_in_cmd || ddr_stall_left != 0);
 
@@ -96,7 +96,7 @@ always @(posedge clk) begin
     end
     if (ddr_reg_stall) ddr_stalled_cycles <= ddr_stalled_cycles + 1;
     if (ddr_reg_en && ddr_reg_we && !ddr_reg_stall) begin
-        ddr_regs[(ddr_reg_off - 6'h2C) >> 2] <= ddr_reg_wdata;
+        ddr_regs[3'((ddr_reg_off - 6'h2C) >> 2)] <= ddr_reg_wdata;
         ddr_in_cmd <= 1'b0;
     end
 end

@@ -27,11 +27,11 @@ module t_mmio_tb;
         forever begin
             @(posedge clk);
             if (swap_req) begin
-                swap_pending <= 1'b1;
+                swap_pending = 1'b1;
                 repeat (300) @(posedge clk);
-                vblank       <= 1'b1;
-                swap_pending <= 1'b0;
-                frame_count  <= 32'h1234_5678;
+                vblank       = 1'b1;
+                swap_pending = 1'b0;
+                frame_count  = 32'h1234_5678;
             end
         end
     end

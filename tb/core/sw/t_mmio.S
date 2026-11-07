@@ -94,10 +94,10 @@ _start:
     sb    t0, 0x101(s4)
     lw    t1, 0x100(s4)
     sw    t1, 68(s1)                /* 0x0F0E0F0C */
-    li    s5, 0x30000000            /* texture stub: 4 bits per texel */
+    li    s5, 0x30002800            /* texture stub: 4 bits per texel */
     li    t0, 0x5A
-    sb    t0, 0x2FFF(s5)
-    lbu   t1, 0x2FFF(s5)
+    sb    t0, 0x7FF(s5)       /* texel 0x2FFF */
+    lbu   t1, 0x7FF(s5)       /* texel 0x2FFF */
     sw    t1, 72(s1)                /* 0x0A */
     lh    t1, 0x100(s4)
     sw    t1, 76(s1)                /* 0x0F0C */
